@@ -1,14 +1,31 @@
+use std::collections::HashSet;
+use std::io::Seek;
 use std::{fs::File, io::Read, path::PathBuf};
 use zip::ZipArchive;
+use zip::write::{SimpleFileOptions, ZipWriter};
 
-use crate::license::License;
+use crate::{
+    crypto::{cipher::aes_cbc256::*, key::ContentKey},
+    license::License,
+};
 
 pub mod xml_utils;
 
 pub use xml_utils::{
-    get_opf_base_path, parse_container_xml, parse_opf_manifest, write_encryption_xml,
-    EncryptedFileInfo, ManifestItem,
+    EncryptedFileInfo, ManifestItem, find_element_attr, get_opf_base_path, parse_container_xml,
+    parse_opf_manifest, write_encryption_xml,
 };
+
+use flate2::Compression;
+use flate2::write::DeflateEncoder;
+use std::io::Write;
+
+/// Compress data using the Deflate algorithm.
+pub fn deflate_compress(data: &[u8]) -> Result<Vec<u8>, std::io::Error> {
+    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
+    encoder.write_all(data)?;
+    encoder.finish()
+}
 
 /// Filenames for specific metadata files
 pub const CONTAINER_FILE: &str = "META-INF/container.xml";
@@ -57,7 +74,6 @@ fn read_binary_from_archive(
 #[derive(Debug)]
 pub struct Epub {
     archive: ZipArchive<File>,
-    #[allow(unused)]
     container: String,
     encryption: Option<String>,
     license: Option<License>,
@@ -90,101 +106,163 @@ impl Epub {
         self.license.as_ref()
     }
 
-    pub fn decrypt_encrypted_content(&mut self, user_key: &[u8; 32]) -> Result<(), String> {
-        use super::crypto::cipher::aes_cbc256::decrypt_aes_256_cbc;
-        use flate2::read::DeflateDecoder;
-        use std::io::Read as _;
+    /// Writes a new zip archive in the given output path with the metadata files from the
+    /// orginal archive and the encrypted content files
+    pub fn write_encrypted_epub(
+        &mut self,
+        output: PathBuf,
+        content_key: &ContentKey,
+    ) -> Result<(), String> {
+        // Create the writer
+        let output = File::create(output).map_err(|e| format!("Unable to open file {}", e))?;
+        let mut writer = ZipWriter::new(output);
 
-        let Some(encrypted_metadata_str) = &self.encryption else {
-            return Err("No encrypted metadata file".to_string());
-        };
-        let Ok(encrypted_metadata) = roxmltree::Document::parse(encrypted_metadata_str) else {
-            return Err("Not valid xml encryption metadata".to_string());
-        };
-
-        // Decrypt the content key using the user key
-        let license = self.license.as_ref().ok_or("No license found in EPUB")?;
-        let content_key = license.decrypt_content_key(user_key)?;
-
-        // Parse XML to extract encrypted file paths and compression info
-        // Each EncryptedData block contains one encrypted file
-        for encrypted_data_node in encrypted_metadata.descendants() {
-            if encrypted_data_node.tag_name().name() != "EncryptedData" {
-                continue;
-            }
-
-            // Extract URI from CipherReference
-            let uri = encrypted_data_node
-                .descendants()
-                .find(|n| n.tag_name().name() == "CipherReference")
-                .and_then(|n| n.attribute("URI"));
-
-            let Some(uri) = uri else {
-                continue;
+        // Clone the reader
+        let manifest_items_to_encrypt = self
+            .clone_reader(&mut writer)
+            .map_err(|e| format!("Failed to clone reader {}", e))?;
+        let mut encrypted_files = Vec::new();
+        let opf_path = self.opf_path()?;
+        let base_path = get_opf_base_path(&opf_path);
+        // Encrypt and write
+        for manifest in manifest_items_to_encrypt {
+            let data = read_binary_from_archive(&mut self.archive, &manifest.href)?
+                .ok_or(format!("Invalid path in opf manifest: {:?}", &manifest))?;
+            let len = data.len();
+            let compressed_data = if manifest.is_codec() {
+                data
+            } else {
+                deflate_compress(&data).map_err(|e| format!("Deflate write error: {:?}", e))?
             };
+            let encrypted_data =
+                encrypt_aes_256_cbc_with_random_iv(&compressed_data, content_key.key());
+            // no need to compress already compressed files
+            let options =
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+            let path = format!("{}{}", base_path, manifest.href);
+            writer
+                .start_file(&path, options)
+                .map_err(|e| format!("Failed to start file {}", e))?;
 
-            // Extract compression method if present
-            let compression_method = encrypted_data_node
-                .descendants()
-                .find(|n| n.tag_name().name() == "Compression")
-                .and_then(|n| n.attribute("Method"));
+            writer
+                .write_all(&encrypted_data)
+                .map_err(|e| format!("Failed to write to file {}", e))?;
 
-            // Read the encrypted file from the archive
-            let Some(encrypted_data) = read_binary_from_archive(&mut self.archive, uri)? else {
-                println!("Warning: Could not find encrypted file: {}", uri);
-                continue;
-            };
-
-            // Extract IV from first 16 bytes
-            if encrypted_data.len() < 16 {
-                println!("Warning: File {} is too small to contain IV", uri);
-                continue;
-            }
-
-            let iv: [u8; 16] = encrypted_data[0..16]
-                .try_into()
-                .map_err(|_| format!("Invalid IV length for {}", uri))?;
-
-            // Ciphertext is everything after the IV
-            let ciphertext = &encrypted_data[16..];
-
-            // Decrypt using content key
-            let mut decrypted = decrypt_aes_256_cbc(ciphertext, &content_key, &iv)
-                .map_err(|e| format!("Failed to decrypt {}: {}", uri, e))?;
-
-            // Decompress if compression method indicates compression
-            // Method="8" is deflate compression (standard ZIP compression method)
-            // Method="0" is "stored" (no compression)
-            if let Some(method) = compression_method {
-                if method == "8" || method.to_lowercase() == "deflate" {
-                    let mut decoder = DeflateDecoder::new(&decrypted[..]);
-                    let mut decompressed = Vec::new();
-                    match decoder.read_to_end(&mut decompressed) {
-                        Ok(_) if !decompressed.is_empty() => {
-                            decrypted = decompressed;
-                        }
-                        _ => {
-                            println!("Warning: Failed to decompress {} (method={})", uri, method);
-                        }
-                    }
-                }
-            }
-
-            // Print file info
-            println!("\nDecrypted: {} ({} bytes)", uri, decrypted.len());
-
-            // For text files, print content preview
-            if uri.ends_with(".html") || uri.ends_with(".xhtml") || uri.ends_with(".xml") {
-                if let Ok(text) = String::from_utf8(decrypted.clone()) {
-                    let preview_len = text.len().min(300);
-                    println!("Preview: {}", &text[..preview_len]);
-                    if text.len() > 300 {
-                        println!("...");
-                    }
-                }
-            }
+            // Track for encryption.xml
+            encrypted_files.push(EncryptedFileInfo {
+                uri: path,
+                is_compressed: !manifest.is_codec(),
+                original_length: len,
+            });
         }
+
+        // Write encryption.xml
+        let encryption_xml = write_encryption_xml(&encrypted_files);
+        writer
+            .start_file(ENCRYPTION_FILE, SimpleFileOptions::default())
+            .map_err(|e| format!("Failed to start file {}", e))?;
+        writer
+            .write_all(encryption_xml.as_bytes())
+            .map_err(|e| format!("Failed to write to file {}", e))?;
+
+        // TODO(write license)
+        // let license_json = serde_json::to_string(&license)?;
+        // writer
+        //     .start_file(LICENSE_FILE, SimpleFileOptions::default())
+        //     .map_err(|e| format!("Failed to start file {}", e))?;
+        // writer
+        //     .write_all(license_json.as_bytes())
+        //     .map_err(|e| format!("Failed to write to file {}", e))?;
+
+        // Finalize
+        writer.finish().map_err(|e| format!("Failed to finish writing file {}", e))?;
+
         Ok(())
+    }
+
+    /// Returns the path to the OPF file from container.xml.
+    pub fn opf_path(&self) -> Result<String, String> {
+        xml_utils::parse_container_xml(&self.container)
+    }
+
+    /// Returns a list of manifest items from the opf file.
+    pub fn manifest_items(&mut self) -> Result<Vec<ManifestItem>, String> {
+        let opf_path = self.opf_path()?;
+        let manifest = read_file_from_archive(&mut self.archive, &opf_path)?
+            .ok_or("manifest file should be in the path pointed by container.xml".to_string())?;
+        let manifest_items = parse_opf_manifest(&manifest)?;
+
+        Ok(manifest_items)
+    }
+
+    /// Clone all files that should NOT be encrypted from this EPUB to a ZipWriter.
+    ///
+    /// Returns the list of ManifestItems that need to be encrypted (were not copied).
+    ///
+    /// This function is AI generated:
+    /// - Copies `mimetype` first (required by EPUB spec)
+    /// - Skips files that need encryption (based on manifest analysis)
+    /// - Skips `META-INF/encryption.xml` and `META-INF/license.lcpl` (will be regenerated)
+    /// - Copies all other files using raw_copy_file (preserves compression)
+    pub fn clone_reader<W: Write + Seek>(
+        &mut self,
+        writer: &mut ZipWriter<W>,
+    ) -> Result<Vec<ManifestItem>, String> {
+        let opf_path = self.opf_path()?;
+        let base_path = xml_utils::get_opf_base_path(&opf_path);
+        let manifest_items = self.manifest_items()?;
+
+        // Build set of full paths for files to encrypt
+        let files_to_encrypt: HashSet<String> = manifest_items
+            .iter()
+            .filter(|m| !m.is_encryption_exempt())
+            .map(|m| format!("{}{}", base_path, m.href))
+            .collect();
+
+        // Items that need encryption (to return)
+        let items_to_encrypt: Vec<ManifestItem> = manifest_items
+            .into_iter()
+            .filter(|m| !m.is_encryption_exempt())
+            .collect();
+
+        // Copy mimetype first (EPUB requirement)
+        if let Ok(mimetype_file) = self.archive.by_name("mimetype") {
+            writer
+                .raw_copy_file(mimetype_file)
+                .map_err(|e| format!("Failed to copy mimetype: {}", e))?;
+        }
+
+        // Copy all other files that don't need encryption
+        for i in 0..self.archive.len() {
+            let file = self
+                .archive
+                .by_index(i)
+                .map_err(|e| format!("Failed to read archive entry {}: {}", i, e))?;
+            let name = file.name().to_string();
+
+            // Skip mimetype (already copied)
+            if name == "mimetype" {
+                continue;
+            }
+
+            // Skip files we'll regenerate
+            if name == ENCRYPTION_FILE || name == LICENSE_FILE {
+                continue;
+            }
+
+            // Skip files that need encryption
+            if files_to_encrypt.contains(&name) {
+                continue;
+            }
+
+            // Copy everything else
+            dbg!(&file.name());
+            writer
+                .raw_copy_file(file)
+                .map_err(|e| format!("Failed to copy {}: {}", name, e))?;
+        }
+
+        Ok(items_to_encrypt)
     }
 }
 
