@@ -8,7 +8,7 @@
 /// Any trusted license providers who wish to implement the production profiles need
 /// to implement this trait for the corresponding profile.
 ///
-/// /// This library only implements the transform for the basic encryption profile
+/// This library only implements the transform for the basic encryption profile
 /// which is an identity function.
 pub trait Transform {
     fn transform(&self, user_key: [u8; 32]) -> [u8; 32];

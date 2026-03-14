@@ -3,6 +3,13 @@ use zip::ZipArchive;
 
 use crate::license::License;
 
+pub mod xml_utils;
+
+pub use xml_utils::{
+    get_opf_base_path, parse_container_xml, parse_opf_manifest, write_encryption_xml,
+    EncryptedFileInfo, ManifestItem,
+};
+
 /// Filenames for specific metadata files
 pub const CONTAINER_FILE: &str = "META-INF/container.xml";
 pub const ENCRYPTION_FILE: &str = "META-INF/encryption.xml";
