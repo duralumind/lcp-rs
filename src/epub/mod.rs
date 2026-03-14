@@ -48,6 +48,7 @@ fn read_binary_from_archive(
 #[derive(Debug)]
 pub struct Epub {
     archive: ZipArchive<File>,
+    #[allow(unused)]
     container: String,
     encryption: Option<String>,
     license: Option<License>,
@@ -65,9 +66,7 @@ impl Epub {
             .map(|s| serde_json::from_str(&s))
             .transpose()
             .map_err(|e| format!("failed to parse lcpl json: {}", e))?;
-        // for file in zip.file_names() {
-        //     dbg!(&file);
-        // }
+
         Ok(Self {
             archive: zip,
             container,
@@ -81,7 +80,7 @@ impl Epub {
     }
 
     pub fn decrypt_encrypted_content(&mut self, user_key: &[u8; 32]) -> Result<(), String> {
-        use crate::cipher::aes_cbc256::decrypt_aes_256_cbc;
+        use super::crypto::cipher::aes_cbc256::decrypt_aes_256_cbc;
         use flate2::read::DeflateDecoder;
         use std::io::Read as _;
 
@@ -179,6 +178,4 @@ impl Epub {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-}
+mod tests {}

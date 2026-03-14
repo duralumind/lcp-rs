@@ -1,7 +1,13 @@
+pub mod encoding;
+pub mod profile;
+
+pub use profile::EncryptionProfile;
 use std::collections::HashMap;
 
-use crate::{certificate_format, cipher, date_format, epub, optional_date_format};
+use crate::crypto::cipher;
+use crate::epub;
 use chrono::{DateTime, FixedOffset};
+use encoding::{certificate_format, date_format, optional_date_format};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
@@ -201,10 +207,7 @@ impl License {
 
     pub fn key_check(&self, passphrase: &str) -> Result<([u8; 32], [u8; 16]), String> {
         let user_key: [u8; 32] = Sha256::digest(&passphrase).into();
-        use base64::{
-            Engine as _,
-            engine::{self, general_purpose},
-        };
+        use base64::{Engine as _, engine::general_purpose};
 
         let key_check_bytes = general_purpose::STANDARD
             .decode(&self.encryption.user_key.key_check)
@@ -225,10 +228,7 @@ impl License {
     }
 
     pub fn decrypt_content_key(&self, user_key: &[u8; 32]) -> Result<[u8; 32], String> {
-        use base64::{
-            Engine as _,
-            engine::general_purpose,
-        };
+        use base64::{Engine as _, engine::general_purpose};
 
         // Base64-decode the encrypted content key
         let encrypted_key_bytes = general_purpose::STANDARD
@@ -288,8 +288,6 @@ fn canonicalize_value(value: Value) -> Value {
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
-
     use super::*;
     use serde_json::json;
 
@@ -424,7 +422,7 @@ mod tests {
           "certificate": "MIIDEjCCAfoCCQDwMOjkYYOjPjANBgkqhkiG9w0BAQUFADBLMQswCQYDVQQGEwJVUzETMBEGA1UECBMKQ2FsaWZvcm5pYTETMBEGA1UEBxMKRXZlcnl3aGVyZTESMBAGA1UEAxMJbG9jYWxob3N0MB4XDTE0MDEwMjIxMjYxNloXDTE1MDEwMjIxMjYxNlowSzELMAkGA1UEBhMCVVMxEzARBgNVBAgTCkNhbGlmb3JuaWExEzARBgNVBAcTCkV2ZXJ5d2hlcmUxEjAQBgNVBAMTCWxvY2FsaG9zdDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBAOpCRECG7icpf0H37kuAM7s42oqggBoikoTpo5yapy+s5eFSp8HSqwhIYgZ4SghNLkj3e652SALav7chyZ2vWvitZycY+aq50n5UTTxDvdwsC5ZNeTycuzVWZALKGhV7VUPEhtWZNm0gruntronNa8l2WS0aF7P5SbhJ65SDQGprFFaYOSyN6550P3kqaAO7tDddcA1cmuIIDRf8tOIIeMkBFk1Qf+lh+3uRP2wztOTECSMRxX/hIkCe5DRFDK2MuDUyc/iY8IbY0hMFFGw5J7MWOwZLBOaZHX+Lf5lOYByPbMH78O0dda6T+tLYAVzsmJdHJFtaRguCaJVtSXKQUAMCAwEAATANBgkqhkiG9w0BAQUFAAOCAQEAi9HIM+FMfqXsRUY0rGxLlw403f3YtAG/ohzt5i8DKiKUG3YAnwRbL/VzXLZaHru7XBC40wmKefKqoA0RHyNEddXgtY/aXzOlfTvp+xirop+D4DwJIbaj8/wHKWYGBucA/VgGY7JeSYYTUSuz2RoYtjPNRELIXN8A+D+nkJ3dxdFQ6jFfVfahN3nCIgRqRIOt1KaNI39CShccCaWJ5DeSASLXLPcEjrTi/pyDzC4kLF0VjHYlKT7lq5RkMO6GeC+7YFvJtAyssM2nqunA2lUgyQHb1q4Ih/dcYOACubtBwW0ITpHz8N7eO+r1dtH/BF4yxeWl6p5kGLvuPXNU21ThgA==",
           "value": "q/3IInic9c/EaJHyG1Kkqk5v1zlJNsiQBmxz4lykhyD3dA2jg2ZzrOenYU9GxP/xhe5H5Kt2WaJ/hnt8+GWrEx1QOwnNEij5CmIpZ63yRNKnFS5rSRnDMYmQT/fkUYco7BUi7MPPU6OFf4+kaToNWl8m/ZlMxDcS3BZnVhSEKzUNQn1f2y3sUcXjes7wHbImDc6dRthbL/E+assh5HEqakrDuA4lM8XNfukEYQJnivqhqMLOGM33RnS5nZKrPPK/c2F/vGjJffSrlX3W3Jlds0/MZ6wtVeKIugR06c56V6+qKsnMLAQJaeOxxBXmbFdAEyplP9irn4D9tQZKqbbMIw=="
         });
-        let signature: Signature = serde_json::from_value(signature_json).unwrap();
-        dbg!(signature.certificate);
+        let signature: Result<Signature, _> = serde_json::from_value(signature_json);
+        assert!(signature.is_ok());
     }
 }
