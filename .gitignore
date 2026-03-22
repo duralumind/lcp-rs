@@ -2,3 +2,5 @@ target/
 .DS_Store
 *.epub
 samples/
+certs/*
+!certs/README.md
