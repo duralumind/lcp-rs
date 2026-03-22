@@ -75,6 +75,7 @@ fn read_binary_from_archive(
 pub struct Epub {
     archive: ZipArchive<File>,
     container: String,
+    #[allow(unused)]
     encryption: Option<String>,
     license: Option<License>,
 }
@@ -106,13 +107,15 @@ impl Epub {
         self.license.as_ref()
     }
 
-    /// Writes a new zip archive in the given output path with the metadata files from the
-    /// orginal archive and the encrypted content files
-    pub fn write_encrypted_epub(
+    /// Creates and returns a new zip archive in the given output path with the metadata files from the
+    /// orginal archive and the encrypted content files.
+    ///
+    /// The
+    pub fn create_encrypted_epub(
         &mut self,
         output: PathBuf,
         content_key: &ContentKey,
-    ) -> Result<(), String> {
+    ) -> Result<ZipWriter<File>, String> {
         // Create the writer
         let output = File::create(output).map_err(|e| format!("Unable to open file {}", e))?;
         let mut writer = ZipWriter::new(output);
@@ -165,17 +168,26 @@ impl Epub {
             .write_all(encryption_xml.as_bytes())
             .map_err(|e| format!("Failed to write to file {}", e))?;
 
-        // TODO(write license)
-        // let license_json = serde_json::to_string(&license)?;
-        // writer
-        //     .start_file(LICENSE_FILE, SimpleFileOptions::default())
-        //     .map_err(|e| format!("Failed to start file {}", e))?;
-        // writer
-        //     .write_all(license_json.as_bytes())
-        //     .map_err(|e| format!("Failed to write to file {}", e))?;
+        Ok(writer)
+    }
 
-        // Finalize
-        writer.finish().map_err(|e| format!("Failed to finish writing file {}", e))?;
+    /// Embed lcpl license file into the epub metadata and write to the output path.
+    pub fn embed_license_and_write(
+        mut encrypted_epub: ZipWriter<File>,
+        license: &License,
+    ) -> Result<(), String> {
+        let license_json =
+            serde_json::to_string(&license).map_err(|e| format!("Invalid license json: {}", e))?;
+        encrypted_epub
+            .start_file(LICENSE_FILE, SimpleFileOptions::default())
+            .map_err(|e| format!("Failed to start file {}", e))?;
+        encrypted_epub
+            .write_all(license_json.as_bytes())
+            .map_err(|e| format!("Failed to write to file {}", e))?;
+
+        encrypted_epub
+            .finish()
+            .map_err(|e| format!("Failed to finish writing file {}", e))?;
 
         Ok(())
     }

@@ -21,6 +21,10 @@ pub enum Commands {
         #[arg(long)]
         password: String,
 
+        /// User password hint
+        #[arg(long)]
+        password_hint: String,
+
         /// Encryption profile to use
         #[arg(long)]
         profile: EncryptionProfile,
@@ -56,9 +60,10 @@ fn main() {
         Commands::Encrypt {
             input,
             password,
+            password_hint,
             profile,
             output,
-        } => encrypt_epub(input, password, profile, output).unwrap(),
+        } => encrypt_epub(input, password, password_hint, profile, output).unwrap(),
         Commands::Decrypt {
             input,
             password,

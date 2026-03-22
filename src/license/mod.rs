@@ -2,11 +2,15 @@ pub mod encoding;
 pub mod profile;
 
 pub use profile::EncryptionProfile;
+use rsa::RsaPrivateKey;
 use std::collections::HashMap;
+use uuid::Uuid;
 
-use crate::crypto::cipher;
+use crate::crypto::cipher::aes_cbc256;
+use crate::crypto::signature::{RSA_SHA256_ALGORITHM, sign_license};
+use crate::crypto::{cipher, key};
 use crate::epub;
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, Utc};
 use encoding::{certificate_format, date_format, optional_date_format};
 use serde_derive::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -15,13 +19,18 @@ use std::collections::BTreeMap;
 use std::ops::Not;
 use x509_cert::Certificate;
 
+pub const DEFAULT_PROVIDER: &str = "https://www.duralumind.com";
+pub const DEFAULT_HASH_ALGORITHM: &str = "http://www.w3.org/2001/04/xmlenc#sha256";
+pub const DEFAULT_ENCRYPTION_ALGORITHM: &str = "http://www.w3.org/2001/04/xmlenc#aes256-cbc";
+pub const DEFAULT_ENCRYPTION_PROFILE: &str = "http://readium.org/lcp/basic-profile";
+
 #[derive(Debug, Serialize, Deserialize)]
 pub enum EncryptionAlgorithm {
     AesCbc,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
-pub struct ContentKey {
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub struct LicenseContentKey {
     /// Encrypted Content Key. Base 64 encoded octet sequence
     encrypted_value: String,
     /// Algorithm used to encrypt the Content Key, identified using the URIs defined in
@@ -30,7 +39,16 @@ pub struct ContentKey {
     algorithm: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+impl Default for LicenseContentKey {
+    fn default() -> Self {
+        Self {
+            algorithm: DEFAULT_ENCRYPTION_ALGORITHM.to_string(),
+            encrypted_value: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct UserKey {
     /// A hint to be displayed to the User to help them remember the User Passphrase
     text_hint: String,
@@ -48,16 +66,36 @@ pub struct UserKey {
     key_check: String,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+impl Default for UserKey {
+    fn default() -> Self {
+        Self {
+            algorithm: DEFAULT_HASH_ALGORITHM.to_string(),
+            text_hint: Default::default(),
+            key_check: Default::default(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
 pub struct Encryption {
     /// Identifies the Encryption Profile used by this LCP-protected
     /// Publication. Type: URI
     profile: String,
     /// contains the Content Key (encrypted using the User Key)
     /// used to encrypt the Publication Resources.
-    content_key: ContentKey,
+    content_key: LicenseContentKey,
     /// contains information regarding the User Key used to encrypt the Content Key.
     user_key: UserKey,
+}
+
+impl Default for Encryption {
+    fn default() -> Self {
+        Self {
+            profile: DEFAULT_ENCRYPTION_PROFILE.to_string(),
+            content_key: Default::default(),
+            user_key: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
@@ -283,6 +321,67 @@ fn canonicalize_value(value: Value) -> Value {
         //     value
         // }
         other => other,
+    }
+}
+
+pub struct LicenseBuilder(License);
+
+impl LicenseBuilder {
+    /// Creates a builder object with default values.
+    pub fn new() -> Self {
+        let now: DateTime<FixedOffset> = Utc::now().fixed_offset();
+        Self(License {
+            id: Uuid::new_v4().to_string(),
+            issued: now.clone(),
+            updated: Some(now),
+            provider: DEFAULT_PROVIDER.to_string(),
+            ..Default::default()
+        })
+    }
+
+    /// Sets the encryption related fields on the license.
+    pub fn encryption(
+        mut self,
+        encrypted_key: &key::EncryptedContentKey,
+        user_key: &key::UserEncryptionKey,
+        hint: String,
+    ) -> Self {
+        self.0.encryption.content_key.encrypted_value = encrypted_key.to_base64();
+        let key_check =
+            aes_cbc256::encrypt_aes_256_cbc_with_random_iv(self.0.id.as_bytes(), user_key.key());
+        self.0.encryption.user_key.text_hint = hint;
+        use base64::{Engine as _, engine::general_purpose};
+        self.0.encryption.user_key.key_check = general_purpose::STANDARD.encode(&key_check);
+        self
+    }
+
+    /// Sets the `signature` on the license with the provider private key.
+    pub fn sign(
+        mut self,
+        private_key: &RsaPrivateKey,
+        provider_certificate: &Certificate,
+    ) -> Result<Self, String> {
+        let signature = sign_license(self.0.canonical_json()?.as_bytes(), private_key)
+            .map_err(|e| e.to_string())?;
+        let sig = Signature {
+            algorithm: RSA_SHA256_ALGORITHM.to_string(),
+            certificate: provider_certificate.clone(),
+            value: signature,
+        };
+        self.0.signature = Some(sig);
+        Ok(self)
+    }
+
+    // Add other optional stuff
+    // pub fn links(&mut self, links: Links) -> &mut self {
+    //   self
+    //  }
+
+    pub fn build(self) -> Result<License, String> {
+        if self.0.signature.is_none() {
+            return Err("License doesn't have signature, call sign first".to_string());
+        }
+        Ok(self.0)
     }
 }
 
