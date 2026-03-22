@@ -194,7 +194,7 @@ pub struct License {
     /// in ISO 8601 format
     #[serde(with = "date_format")]
     pub issued: DateTime<FixedOffset>,
-    /// Date and time when the license was last updated	in
+    /// Date and time when the license was last updated in
     /// ISO 8601 format
     #[serde(with = "optional_date_format")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -213,6 +213,11 @@ pub struct License {
 }
 
 impl License {
+    /// Returns a `Builder` for creating a license object.
+    pub fn builder() -> LicenseBuilder {
+        LicenseBuilder::new()
+    }
+
     pub fn canonical_json(&self) -> Result<String, String> {
         // First, serialize to JSON Value to manipulate the structure
         let mut value =
@@ -259,9 +264,9 @@ impl License {
             )?;
 
         if decrypted_bytes.as_slice() == self.id.as_bytes() {
-            return Ok(());
+            Ok(())
         } else {
-            return Err("key check failed".to_string());
+            Err("key check failed".to_string())
         }
     }
 
@@ -300,13 +305,19 @@ fn canonicalize_value(value: Value) -> Value {
 
 pub struct LicenseBuilder(License);
 
+impl Default for LicenseBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl LicenseBuilder {
     /// Creates a builder object with default values.
     pub fn new() -> Self {
         let now: DateTime<FixedOffset> = Utc::now().fixed_offset();
         Self(License {
             id: Uuid::new_v4().to_string(),
-            issued: now.clone(),
+            issued: now,
             updated: Some(now),
             provider: DEFAULT_PROVIDER.to_string(),
             ..Default::default()

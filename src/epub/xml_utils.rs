@@ -67,18 +67,14 @@ impl ManifestItem {
     /// - NCX documents (media-type is "application/x-dtbncx+xml")
     pub fn is_encryption_exempt(&self) -> bool {
         // Navigation documents
-        if self
-            .properties
-            .as_ref()
-            .map_or(false, |p| p.contains("nav"))
-        {
+        if self.properties.as_ref().is_some_and(|p| p.contains("nav")) {
             return true;
         }
         // Cover images (EPUB 3 style via properties)
         if self
             .properties
             .as_ref()
-            .map_or(false, |p| p.contains("cover-image"))
+            .is_some_and(|p| p.contains("cover-image"))
         {
             return true;
         }
@@ -170,12 +166,10 @@ pub fn parse_opf_manifest(xml: &str) -> Result<Vec<ManifestItem>, String> {
             let properties = node.attribute("properties").map(|s| s.to_string());
 
             // Check if this is the cover image (EPUB 2 or EPUB 3)
-            let is_cover = epub2_cover_id
-                .as_ref()
-                .map_or(false, |cover_id| cover_id == &id)
+            let is_cover = epub2_cover_id.as_ref() == Some(&id)
                 || properties
                     .as_ref()
-                    .map_or(false, |p| p.contains("cover-image"));
+                    .is_some_and(|p| p.contains("cover-image"));
 
             Some(ManifestItem {
                 id,

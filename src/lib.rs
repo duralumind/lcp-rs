@@ -65,7 +65,7 @@ pub fn encrypt_epub(
         .build()
         .map_err(|e| format!("Failed to build license {}", e))?;
 
-    let _ = Epub::embed_license_and_write(encrypted_epub, &license)?;
+    Epub::embed_license_and_write(encrypted_epub, &license)?;
 
     Ok(())
 }
