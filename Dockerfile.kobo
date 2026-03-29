@@ -1,21 +1,24 @@
-FROM ubuntu:22.04
+FROM rust:slim
 
 RUN apt-get update && apt-get install -y \
-    curl \
+    wget xz-utils \
     gcc-arm-linux-gnueabihf \
     && rm -rf /var/lib/apt/lists/*
 
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y \
-    && . /root/.cargo/env \
+# Install zig (for zigbuild's linker to target specific glibc version)
+RUN wget -q https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz \
+    && tar -xf zig-linux-x86_64-0.13.0.tar.xz -C /usr/local \
+    && ln -s /usr/local/zig-linux-x86_64-0.13.0/zig /usr/local/bin/zig \
+    && rm zig-linux-x86_64-0.13.0.tar.xz
+
+RUN cargo install cargo-zigbuild \
     && rustup target add armv7-unknown-linux-gnueabihf
 
 WORKDIR /src
 
-COPY .cargo/config.toml /src/.cargo/config.toml
-
 COPY . .
 
-RUN . /root/.cargo/env \
-    && cargo build --release -p plugin --target armv7-unknown-linux-gnueabihf
+# Target glibc 2.17 — Kobo only has up to GLIBC_2.18
+RUN cargo zigbuild --release -p plugin --target armv7-unknown-linux-gnueabihf.2.17
 
 CMD ["cp", "target/armv7-unknown-linux-gnueabihf/release/libreadium_lcp.so", "/out/libreadium_lcp.so"]
