@@ -1,0 +1,11 @@
+[package]
+name = "plugin"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "readium_lcp"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+lcp-core = {path = "../lcp-core"}
