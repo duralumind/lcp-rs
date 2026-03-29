@@ -179,7 +179,8 @@ impl Epub {
         let base_path = get_opf_base_path(&opf_path);
         // Encrypt and write
         for manifest in manifest_items_to_encrypt {
-            let data = read_binary_from_archive(&mut self.archive, &manifest.href)?
+            let path = format!("{}{}", base_path, manifest.href);
+            let data = read_binary_from_archive(&mut self.archive, &path)?
                 .ok_or_else(|| EpubError::InvalidManifest(format!("{:?}", &manifest)))?;
             let len = data.len();
             let compressed_data = if manifest.is_codec() {
@@ -193,7 +194,6 @@ impl Epub {
             // no need to compress already compressed files
             let options =
                 SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-            let path = format!("{}{}", base_path, manifest.href);
             writer
                 .start_file(&path, options)
                 .map_err(|e| EpubError::WriteFailed(format!("Failed to start file: {}", e)))?;
