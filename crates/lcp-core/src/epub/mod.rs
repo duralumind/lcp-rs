@@ -337,8 +337,6 @@ impl Epub {
         let output =
             File::create(output).map_err(|e| EpubError::FileOpenFailed(format!("{}", e)))?;
         let mut writer = ZipWriter::new(output);
-        let opf_path = self.opf_path()?;
-        let base_path = get_opf_base_path(&opf_path);
         let mut decrypted_files = HashSet::new();
 
         // Decrypt and write decrypted files
@@ -368,8 +366,8 @@ impl Epub {
             }
             // no need to compress already compressed files
             let options =
-                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
-            let path = format!("{}{}", base_path, encrypted_file.uri);
+                SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
+            let path = &encrypted_file.uri;
             decrypted_files.insert(path.clone());
             writer
                 .start_file(&path, options)

@@ -1,6 +1,6 @@
 use super::encoding::date_format;
 use chrono::{DateTime, FixedOffset};
-use serde::{Deserialize, Serialize};
+use serde_derive::{Deserialize, Serialize};
 
 use crate::license::lcp_license::Link;
 
