@@ -209,18 +209,18 @@ mod tests {
     #[test]
     fn test_full_roundtrip() {
         let _ = encrypt_epub(
-            PathBuf::from("samples/way_of_kings.epub"),
+            PathBuf::from("samples/moby-dick.epub"),
             "test123".to_string(),
             "password is test123".to_string(),
             EncryptionProfile::Basic,
-            Some(PathBuf::from("/tmp/way_of_kings_encrypted.epub")),
+            Some(PathBuf::from("/tmp/moby-dick-encrypted.epub")),
         )
         .unwrap();
         let _ = decrypt_epub(
-            DecryptionInput::EmbeddedEpub(PathBuf::from("/tmp/way_of_kings_encrypted.epub")),
+            DecryptionInput::EmbeddedEpub(PathBuf::from("/tmp/moby-dick-encrypted.epub")),
             "test123".to_string(),
             EncryptionProfile::Basic,
-            Some(PathBuf::from("/tmp/way_of_kings_decrypted.epub")),
+            Some(PathBuf::from("/tmp/moby-dick-decrypted.epub")),
         )
         .unwrap();
     }
