@@ -4,6 +4,7 @@ members = [
     "crates/lcp-core",
     "crates/lcp-cli",
     "crates/lcp-server", "crates/plugin",
+    "crates/plugin-test",
 ]
 
 [profile.release]
