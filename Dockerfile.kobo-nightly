@@ -21,6 +21,13 @@ COPY . .
 
 ENV RUSTFLAGS="-C target-feature=-neon -C panic=abort"
 
+# Build Rust as a static library (.a)
 RUN cargo zigbuild --release -p plugin-test --target armv7-unknown-linux-gnueabihf.2.17
 
-CMD ["cp", "target/armv7-unknown-linux-gnueabihf/release/libplugin_test.so", "/out/libplugin_test.so"]
+# Link into a .so using the ARM GCC that we know produces working shared libs
+RUN arm-linux-gnueabihf-gcc -shared -o target/libplugin_test.so \
+    crates/plugin-test/wrapper.c \
+    -Wl,--whole-archive target/armv7-unknown-linux-gnueabihf/release/libplugin_test.a -Wl,--no-whole-archive \
+    -lpthread -ldl -lm
+
+CMD ["cp", "target/libplugin_test.so", "/out/libplugin_test.so"]
