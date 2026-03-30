@@ -19,6 +19,6 @@ WORKDIR /src
 COPY . .
 
 # Target glibc 2.17 — Kobo only has up to GLIBC_2.18
-RUN RUSTFLAGS="-C target-feature=-neon" cargo zigbuild --release -p plugin --target armv7-unknown-linux-gnueabihf.2.17
+RUN RUSTFLAGS="-C target-feature=-neon -C panic=abort" cargo zigbuild --release -p plugin --target armv7-unknown-linux-gnueabihf.2.17
 
 CMD ["cp", "target/armv7-unknown-linux-gnueabihf/release/libreadium_lcp.so", "/out/libreadium_lcp.so"]

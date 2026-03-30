@@ -5,3 +5,6 @@ members = [
     "crates/lcp-cli",
     "crates/lcp-server", "crates/plugin",
 ]
+
+[profile.release]
+panic = "abort"
