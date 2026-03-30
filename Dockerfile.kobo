@@ -5,23 +5,16 @@ RUN apt-get update && apt-get install -y \
     gcc-arm-linux-gnueabihf \
     && rm -rf /var/lib/apt/lists/*
 
-# Install zig (for targeting specific glibc version in Rust compilation)
-RUN wget -q https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz \
-    && tar -xf zig-linux-x86_64-0.13.0.tar.xz -C /usr/local \
-    && ln -s /usr/local/zig-linux-x86_64-0.13.0/zig /usr/local/bin/zig \
-    && rm zig-linux-x86_64-0.13.0.tar.xz
-
-RUN cargo install cargo-zigbuild \
-    && rustup target add armv7-unknown-linux-gnueabihf
+RUN rustup target add armv7-unknown-linux-gnueabihf
 
 WORKDIR /src
 
 COPY . .
 
-ENV RUSTFLAGS="-C target-feature=-neon -C panic=abort"
+ENV RUSTFLAGS="-C target-feature=-C panic=abort"
 
-# Build Rust as a static library (.a) — zigbuild targets glibc 2.17
-RUN cargo zigbuild --release -p plugin --target armv7-unknown-linux-gnueabihf.2.17
+# Build Rust as a static library
+RUN cargo build --release -p plugin --target armv7-unknown-linux-gnueabihf
 
 # Link into a .so using ARM GCC's linker (produces ELF compatible with Kobo's ancient ld.so)
 # -nostdlib: don't link GCC's crt/libc (avoids embedding newer glibc version requirements)
