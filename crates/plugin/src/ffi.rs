@@ -2,6 +2,8 @@
 //!
 //! This module provides C-compatible functions for use from Lua/LuaJIT via FFI.
 
+#![allow(clippy::needless_return)]
+
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::path::PathBuf;
@@ -46,8 +48,11 @@ pub extern "C" fn lcp_init() -> i32 {
 /// * `1` if the file is LCP encrypted
 /// * `0` if the file is not LCP encrypted
 /// * `-1` on error (call lcp_get_error for details)
+/// # Safety
+///
+/// This is an ffi function that is called from C.
 #[unsafe(no_mangle)]
-pub extern "C" fn lcp_is_encrypted(epub_path: *const c_char) -> i32 {
+pub unsafe extern "C" fn lcp_is_encrypted(epub_path: *const c_char) -> i32 {
     clear_error();
     log("lcp_is_encrypted called");
 
@@ -90,8 +95,11 @@ pub extern "C" fn lcp_is_encrypted(epub_path: *const c_char) -> i32 {
 /// * `1` if the passphrase is incorrect
 /// * `2` if the file is not LCP encrypted
 /// * `-1` on other errors (call lcp_get_error for details)
+/// # Safety
+///
+/// This is an ffi function that is called from C.
 #[unsafe(no_mangle)]
-pub extern "C" fn lcp_decrypt_epub(
+pub unsafe extern "C" fn lcp_decrypt_epub(
     epub_path: *const c_char,
     output_path: *const c_char,
     passphrase: *const c_char,
@@ -173,7 +181,7 @@ pub extern "C" fn lcp_decrypt_epub(
         lcp_core::crypto::key::HashAlgorithm::Sha256,
         EncryptionProfile::Basic,
     );
-    if let Err(_) = license.key_check(&user_encryption_key) {
+    if license.key_check(&user_encryption_key).is_err() {
         set_error("Incorrect passphrase".to_string());
         log("incorrect passphrase");
         return 1;

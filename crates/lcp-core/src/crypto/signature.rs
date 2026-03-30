@@ -164,7 +164,8 @@ mod tests {
     // Embed the test certificates
     const ROOT_CA_DER: &[u8] = include_bytes!("../../../../certs/root_ca.der");
     const PROVIDER_CERT_DER: &[u8] = include_bytes!("../../../../certs/provider.der");
-    const PROVIDER_PRIVATE_KEY_DER: &[u8] = include_bytes!("../../../../certs/provider_private.der");
+    const PROVIDER_PRIVATE_KEY_DER: &[u8] =
+        include_bytes!("../../../../certs/provider_private.der");
 
     #[test]
     fn test_load_certificates() {

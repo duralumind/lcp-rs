@@ -102,12 +102,13 @@ pub fn encrypt_epub_from_bytes(
 
     // Read source epub from bytes
     let reader = Cursor::new(epub_bytes);
-    let mut archive = ZipArchive::new(reader)
-        .map_err(|e| EpubError::ArchiveReadFailed(format!("{}", e)))?;
+    let mut archive =
+        ZipArchive::new(reader).map_err(|e| EpubError::ArchiveReadFailed(format!("{}", e)))?;
 
     // Read container.xml
     let container = {
-        let mut zipfile = archive.by_path(epub::CONTAINER_FILE)
+        let mut zipfile = archive
+            .by_path(epub::CONTAINER_FILE)
             .map_err(|_| EpubError::MissingRequiredFile(epub::CONTAINER_FILE.to_string()))?;
         let mut buf = String::new();
         std::io::Read::read_to_string(&mut zipfile, &mut buf)
@@ -115,26 +116,28 @@ pub fn encrypt_epub_from_bytes(
         buf
     };
 
-    let opf_path = epub::xml_utils::parse_container_xml(&container)
-        .map_err(EpubError::XmlParseFailed)?;
+    let opf_path =
+        epub::xml_utils::parse_container_xml(&container).map_err(EpubError::XmlParseFailed)?;
     let base_path = epub::xml_utils::get_opf_base_path(&opf_path);
 
     // Read OPF manifest
     let manifest_items = {
-        let mut opf_file = archive.by_path(&opf_path)
+        let mut opf_file = archive
+            .by_path(&opf_path)
             .map_err(|_| EpubError::MissingRequiredFile(opf_path.clone()))?;
         let mut opf_content = String::new();
         std::io::Read::read_to_string(&mut opf_file, &mut opf_content)
             .map_err(|e| EpubError::ArchiveReadFailed(format!("{}", e)))?;
-        epub::xml_utils::parse_opf_manifest(&opf_content)
-            .map_err(EpubError::XmlParseFailed)?
+        epub::xml_utils::parse_opf_manifest(&opf_content).map_err(EpubError::XmlParseFailed)?
     };
 
-    let items_to_encrypt: Vec<_> = manifest_items.iter()
+    let items_to_encrypt: Vec<_> = manifest_items
+        .iter()
         .filter(|m| !m.is_encryption_exempt())
         .collect();
 
-    let files_to_encrypt: std::collections::HashSet<String> = items_to_encrypt.iter()
+    let files_to_encrypt: std::collections::HashSet<String> = items_to_encrypt
+        .iter()
         .map(|m| format!("{}{}", base_path, m.href))
         .collect();
 
@@ -144,13 +147,15 @@ pub fn encrypt_epub_from_bytes(
 
     // Copy mimetype first
     if let Ok(mimetype_file) = archive.by_name("mimetype") {
-        writer.raw_copy_file(mimetype_file)
+        writer
+            .raw_copy_file(mimetype_file)
             .map_err(|e| EpubError::WriteFailed(format!("Failed to copy mimetype: {}", e)))?;
     }
 
     // Copy non-encrypted files
     for i in 0..archive.len() {
-        let file = archive.by_index(i)
+        let file = archive
+            .by_index(i)
             .map_err(|e| EpubError::ArchiveReadFailed(format!("{}", e)))?;
         let name = file.name().to_string();
         if name == "mimetype" || name == epub::ENCRYPTION_FILE || name == epub::LICENSE_FILE {
@@ -159,7 +164,8 @@ pub fn encrypt_epub_from_bytes(
         if files_to_encrypt.contains(&name) {
             continue;
         }
-        writer.raw_copy_file(file)
+        writer
+            .raw_copy_file(file)
             .map_err(|e| EpubError::WriteFailed(format!("Failed to copy {}: {}", name, e)))?;
     }
 
@@ -168,7 +174,8 @@ pub fn encrypt_epub_from_bytes(
     for manifest in &items_to_encrypt {
         let path = format!("{}{}", base_path, manifest.href);
         let data = {
-            let mut zipfile = archive.by_path(&path)
+            let mut zipfile = archive
+                .by_path(&path)
                 .map_err(|_| EpubError::InvalidManifest(format!("{:?}", &manifest)))?;
             let mut buf = Vec::new();
             std::io::Read::read_to_end(&mut zipfile, &mut buf)
@@ -186,11 +193,13 @@ pub fn encrypt_epub_from_bytes(
             &compressed_data,
             content_key.key(),
         );
-        let options = SimpleFileOptions::default()
-            .compression_method(zip::CompressionMethod::Stored);
-        writer.start_file(&path, options)
+        let options =
+            SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        writer
+            .start_file(&path, options)
             .map_err(|e| EpubError::WriteFailed(format!("{}", e)))?;
-        writer.write_all(&encrypted_data)
+        writer
+            .write_all(&encrypted_data)
             .map_err(|e| EpubError::WriteFailed(format!("{}", e)))?;
 
         encrypted_files.push(epub::xml_utils::EncryptedFileInfo {
@@ -202,12 +211,15 @@ pub fn encrypt_epub_from_bytes(
 
     // Write encryption.xml
     let encryption_xml = epub::xml_utils::write_encryption_xml(&encrypted_files);
-    writer.start_file(epub::ENCRYPTION_FILE, SimpleFileOptions::default())
+    writer
+        .start_file(epub::ENCRYPTION_FILE, SimpleFileOptions::default())
         .map_err(|e| EpubError::WriteFailed(format!("{}", e)))?;
-    writer.write_all(encryption_xml.as_bytes())
+    writer
+        .write_all(encryption_xml.as_bytes())
         .map_err(|e| EpubError::WriteFailed(format!("{}", e)))?;
 
-    let result = writer.finish()
+    let result = writer
+        .finish()
         .map_err(|e| EpubError::WriteFailed(format!("{}", e)))?;
 
     Ok((result.into_inner(), encrypted_files))
@@ -226,10 +238,7 @@ pub fn decrypt_epub(
     root_ca_der: &[u8],
 ) -> Result<(), Error> {
     let output_path = output.unwrap_or_else(|| {
-        let stem = epub_path
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy();
+        let stem = epub_path.file_stem().unwrap_or_default().to_string_lossy();
         epub_path.with_file_name(format!("{}.decrypted.epub", stem))
     });
 

@@ -1396,10 +1396,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "plugin-test"
-version = "0.1.0"
-
-[[package]]
 name = "potential_utf"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

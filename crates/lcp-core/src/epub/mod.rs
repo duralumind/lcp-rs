@@ -370,7 +370,7 @@ impl Epub {
             let path = &encrypted_file.uri;
             decrypted_files.insert(path.clone());
             writer
-                .start_file(&path, options)
+                .start_file(path, options)
                 .map_err(|e| EpubError::WriteFailed(format!("Failed to start file: {}", e)))?;
 
             writer

@@ -128,8 +128,15 @@ fn main() {
                 }
                 (Some(_), Some(_)) => unreachable!("clap conflicts_with prevents this"),
             };
-            decrypt_epub(epub_path, external_license, password, profile, output, ROOT_CA_DER)
-                .unwrap()
+            decrypt_epub(
+                epub_path,
+                external_license,
+                password,
+                profile,
+                output,
+                ROOT_CA_DER,
+            )
+            .unwrap()
         }
     }
 }
