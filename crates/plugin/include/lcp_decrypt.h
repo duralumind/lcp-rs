@@ -13,6 +13,13 @@ extern "C" {
 #endif
 
 /**
+ * Initialize the library and verify it's functional.
+ *
+ * @return 0 on success
+ */
+int lcp_init(void);
+
+/**
  * Check if an EPUB file is LCP encrypted.
  *
  * @param epub_path Path to the EPUB file (null-terminated string)

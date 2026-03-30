@@ -2,36 +2,45 @@
 //!
 //! This module provides C-compatible functions for use from Lua/LuaJIT via FFI.
 
-use std::cell::RefCell;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::path::PathBuf;
+use std::sync::Mutex;
 
 use lcp_core::crypto::key::{UserEncryptionKey, UserPassphrase};
 use lcp_core::epub::Epub;
 use lcp_core::license::EncryptionProfile;
 
-// Thread-local storage for the last error message
-thread_local! {
-    static LAST_ERROR: RefCell<Option<CString>> = RefCell::new(None);
-}
+// Global error storage (using Mutex instead of thread_local to avoid TLS init issues on old ARM)
+static LAST_ERROR: Mutex<Option<CString>> = Mutex::new(None);
 
 fn set_error(msg: String) {
-    LAST_ERROR.with(|e| {
-        *e.borrow_mut() = CString::new(msg).ok();
-    });
+    if let Ok(mut guard) = LAST_ERROR.lock() {
+        *guard = CString::new(msg).ok();
+    }
 }
 
 fn clear_error() {
-    LAST_ERROR.with(|e| {
-        *e.borrow_mut() = None;
-    });
+    if let Ok(mut guard) = LAST_ERROR.lock() {
+        *guard = None;
+    }
+}
+
+fn log(msg: &str) {
+    eprintln!("[lcp-rs] {}", msg);
+}
+
+/// Initialize the library and verify it's functional.
+///
+/// # Returns
+/// * `0` on success
+#[unsafe(no_mangle)]
+pub extern "C" fn lcp_init() -> i32 {
+    log("lcp_init called - library loaded successfully");
+    0
 }
 
 /// Check if an EPUB file is LCP encrypted.
-///
-/// # Arguments
-/// * `epub_path` - Path to the EPUB file (null-terminated C string)
 ///
 /// # Returns
 /// * `1` if the file is LCP encrypted
@@ -40,37 +49,41 @@ fn clear_error() {
 #[unsafe(no_mangle)]
 pub extern "C" fn lcp_is_encrypted(epub_path: *const c_char) -> i32 {
     clear_error();
+    log("lcp_is_encrypted called");
+
+    if epub_path.is_null() {
+        set_error("epub_path is null".to_string());
+        log("ERROR: epub_path is null");
+        return -1;
+    }
 
     let path = match unsafe { CStr::from_ptr(epub_path) }.to_str() {
-        Ok(s) => PathBuf::from(s),
+        Ok(s) => {
+            log(&format!("checking: {}", s));
+            PathBuf::from(s)
+        }
         Err(e) => {
             set_error(format!("Invalid UTF-8 in path: {}", e));
+            log(&format!("ERROR: invalid UTF-8 in path: {}", e));
             return -1;
         }
     };
 
     match Epub::new(path) {
         Ok(epub) => {
-            if epub.license().is_some() {
-                1
-            } else {
-                0
-            }
+            let encrypted = epub.license().is_some();
+            log(&format!("encrypted: {}", encrypted));
+            if encrypted { 1 } else { 0 }
         }
         Err(e) => {
-            // If we can't open the file, it's not a valid encrypted EPUB
             set_error(format!("Failed to open EPUB: {}", e));
+            log(&format!("ERROR: failed to open EPUB: {}", e));
             -1
         }
     }
 }
 
 /// Decrypt an LCP-encrypted EPUB to a new file.
-///
-/// # Arguments
-/// * `epub_path` - Path to the encrypted EPUB file (null-terminated C string)
-/// * `output_path` - Path where the decrypted EPUB will be written (null-terminated C string)
-/// * `passphrase` - The user's passphrase (null-terminated C string)
 ///
 /// # Returns
 /// * `0` on success
@@ -84,18 +97,41 @@ pub extern "C" fn lcp_decrypt_epub(
     passphrase: *const c_char,
 ) -> i32 {
     clear_error();
+    log("lcp_decrypt_epub called");
 
-    // Parse input paths
+    if epub_path.is_null() {
+        set_error("epub_path is null".to_string());
+        log("ERROR: epub_path is null");
+        return -1;
+    }
+    if output_path.is_null() {
+        set_error("output_path is null".to_string());
+        log("ERROR: output_path is null");
+        return -1;
+    }
+    if passphrase.is_null() {
+        set_error("passphrase is null".to_string());
+        log("ERROR: passphrase is null");
+        return -1;
+    }
+
     let input_path = match unsafe { CStr::from_ptr(epub_path) }.to_str() {
-        Ok(s) => PathBuf::from(s),
+        Ok(s) => {
+            log(&format!("input: {}", s));
+            PathBuf::from(s)
+        }
         Err(e) => {
             set_error(format!("Invalid UTF-8 in input path: {}", e));
+            log(&format!("ERROR: invalid UTF-8 in input path: {}", e));
             return -1;
         }
     };
 
     let output = match unsafe { CStr::from_ptr(output_path) }.to_str() {
-        Ok(s) => PathBuf::from(s),
+        Ok(s) => {
+            log(&format!("output: {}", s));
+            PathBuf::from(s)
+        }
         Err(e) => {
             set_error(format!("Invalid UTF-8 in output path: {}", e));
             return -1;
@@ -115,6 +151,7 @@ pub extern "C" fn lcp_decrypt_epub(
         Ok(e) => e,
         Err(e) => {
             set_error(format!("Failed to open EPUB: {}", e));
+            log(&format!("ERROR: failed to open EPUB: {}", e));
             return -1;
         }
     };
@@ -124,11 +161,13 @@ pub extern "C" fn lcp_decrypt_epub(
         Some(l) => l,
         None => {
             set_error("EPUB is not LCP encrypted".to_string());
+            log("not LCP encrypted");
             return 2;
         }
     };
 
     // Verify passphrase and get user key
+    log("verifying passphrase...");
     let user_encryption_key = UserEncryptionKey::new(
         UserPassphrase(pass.to_string()),
         lcp_core::crypto::key::HashAlgorithm::Sha256,
@@ -136,28 +175,35 @@ pub extern "C" fn lcp_decrypt_epub(
     );
     if let Err(_) = license.key_check(&user_encryption_key) {
         set_error("Incorrect passphrase".to_string());
+        log("incorrect passphrase");
         return 1;
     };
 
     // Decrypt the content key
+    log("decrypting content key...");
     let content_key = match license.decrypt_content_key(&user_encryption_key) {
         Ok(k) => k,
         Err(e) => {
             set_error(format!("Failed to decrypt content key: {}", e));
+            log(&format!("ERROR: failed to decrypt content key: {}", e));
             return -1;
         }
     };
 
+    log("creating decrypted EPUB...");
     match epub.create_decrypted_epub(output, &content_key) {
         Ok(writer) => {
             if let Err(e) = writer.finish() {
                 set_error(format!("Failed to finalize EPUB: {}", e));
+                log(&format!("ERROR: failed to finalize EPUB: {}", e));
                 return -1;
             }
+            log("decryption successful");
             return 0;
         }
         Err(e) => {
             set_error(e.to_string());
+            log(&format!("ERROR: {}", e));
             return -1;
         }
     }
@@ -170,8 +216,11 @@ pub extern "C" fn lcp_decrypt_epub(
 /// The string is valid until the next call to any lcp_* function.
 #[unsafe(no_mangle)]
 pub extern "C" fn lcp_get_error() -> *const c_char {
-    LAST_ERROR.with(|e| match e.borrow().as_ref() {
-        Some(cstr) => cstr.as_ptr(),
-        None => std::ptr::null(),
-    })
+    match LAST_ERROR.lock() {
+        Ok(guard) => match guard.as_ref() {
+            Some(cstr) => cstr.as_ptr(),
+            None => std::ptr::null(),
+        },
+        Err(_) => std::ptr::null(),
+    }
 }

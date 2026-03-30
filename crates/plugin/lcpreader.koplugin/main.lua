@@ -21,6 +21,7 @@ local T = require("ffi/util").template
 
 -- FFI declarations for the LCP library
 ffi.cdef[[
+    int lcp_init(void);
     int lcp_is_encrypted(const char* epub_path);
     int lcp_decrypt_epub(const char* epub_path, const char* output_path, const char* passphrase);
     const char* lcp_get_error(void);
@@ -98,6 +99,8 @@ function LcpReader:loadLibrary()
     local ok, lib = pcall(ffi.loadlib, "readium_lcp")
     if ok then
         logger.info("LcpReader: successfully loaded library via ffi.loadlib")
+        local init_result = lib.lcp_init()
+        logger.info("LcpReader: lcp_init returned:", init_result)
         self.lcp_lib = lib
         return lib
     else
@@ -117,6 +120,8 @@ function LcpReader:loadLibrary()
         ok, lib = pcall(ffi.load, path)
         if ok then
             logger.info("LcpReader: loaded library from:", path)
+            local init_result = lib.lcp_init()
+            logger.info("LcpReader: lcp_init returned:", init_result)
             self.lcp_lib = lib
             return lib
         else
