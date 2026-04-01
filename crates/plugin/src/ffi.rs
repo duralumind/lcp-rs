@@ -11,7 +11,6 @@ use std::sync::Mutex;
 
 use lcp_core::crypto::key::{UserEncryptionKey, UserPassphrase};
 use lcp_core::epub::Epub;
-use lcp_core::license::EncryptionProfile;
 
 // Global error storage (using Mutex instead of thread_local to avoid TLS init issues on old ARM)
 static LAST_ERROR: Mutex<Option<CString>> = Mutex::new(None);
@@ -174,12 +173,20 @@ pub unsafe extern "C" fn lcp_decrypt_epub(
         }
     };
 
+    let profile = match license.profile() {
+        Ok(profile) => profile,
+        Err(e) => {
+            set_error(e.to_string());
+            log(&e.to_string());
+            return 2;
+        }
+    };
     // Verify passphrase and get user key
     log("verifying passphrase...");
     let user_encryption_key = UserEncryptionKey::new(
         UserPassphrase(pass.to_string()),
         lcp_core::crypto::key::HashAlgorithm::Sha256,
-        EncryptionProfile::Basic,
+        profile,
     );
     if license.key_check(&user_encryption_key).is_err() {
         set_error("Incorrect passphrase".to_string());

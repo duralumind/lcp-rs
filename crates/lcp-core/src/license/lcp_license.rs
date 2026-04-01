@@ -1,5 +1,6 @@
 use rsa::RsaPrivateKey;
 use std::collections::HashMap;
+use std::str::FromStr;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -7,6 +8,7 @@ use super::encoding::{certificate_format, date_format, optional_date_format};
 use crate::crypto::cipher::aes_cbc256;
 use crate::crypto::key::{ContentKey, EncryptedContentKey, UserEncryptionKey};
 use crate::crypto::signature::{RSA_SHA256_ALGORITHM, sign_license};
+use crate::license::EncryptionProfile;
 use crate::{crypto, epub};
 use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, FixedOffset, Utc};
@@ -43,6 +45,8 @@ pub enum LicenseError {
     /// Cipher operation failed
     #[error("Signature validation failed: {0}")]
     SignatureValidationError(String),
+    #[error("Unsupported encryption profile: {0}")]
+    UnsupportedEncryptionProfile(String),
 }
 
 pub const DEFAULT_PROVIDER: &str = "https://www.duralumind.com";
@@ -272,6 +276,14 @@ impl License {
                 None
             }
         })
+    }
+
+    /// Returns the encryption profile that is used in this license.
+    ///
+    /// Returns Ok if we support the profile otherwise returns an error.
+    pub fn profile(&self) -> Result<EncryptionProfile, LicenseError> {
+        EncryptionProfile::from_str(&self.encryption.profile)
+            .map_err(LicenseError::UnsupportedEncryptionProfile)
     }
 
     /// Check that the `key_check` bytes decrypted with the user encryption key is

@@ -1,4 +1,4 @@
-use crate::crypto::transform::Transform;
+use crate::{crypto::transform::Transform, license::lcp_license::DEFAULT_ENCRYPTION_PROFILE};
 
 /// Encryption profiles supported by LCP
 #[derive(Debug, Clone, Copy)]
@@ -20,7 +20,7 @@ impl std::str::FromStr for EncryptionProfile {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s.to_lowercase().as_str() {
-            "basic" => Ok(Self::Basic),
+            DEFAULT_ENCRYPTION_PROFILE => Ok(Self::Basic),
             _ => Err(format!("Unknown encryption profile: {}", s)),
         }
     }
