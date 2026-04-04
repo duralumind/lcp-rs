@@ -233,7 +233,6 @@ pub fn decrypt_epub(
     epub_path: PathBuf,
     external_license: Option<License>,
     password: String,
-    profile: EncryptionProfile,
     output: Option<PathBuf>,
     root_ca_der: &[u8],
 ) -> Result<(), Error> {
@@ -245,7 +244,6 @@ pub fn decrypt_epub(
     println!("Decrypting EPUB:");
     println!("  Input:    {}", epub_path.display());
     println!("  Output:   {}", output_path.display());
-    println!("  Profile:  {:?}", profile);
 
     let mut epub = Epub::new(epub_path)?;
     let license = match external_license.as_ref() {
@@ -254,6 +252,7 @@ pub fn decrypt_epub(
             .license()
             .ok_or(EpubError::MissingRequiredFile("license.lcpl".to_string()))?,
     };
+    let profile = license.profile().map_err(Error::License)?;
     let passphrase = UserPassphrase(password);
     let root_cert =
         load_certificate_from_der(root_ca_der).expect("Failed to load root certificate");
@@ -293,7 +292,6 @@ mod tests {
             PathBuf::from("/tmp/moby-dick-encrypted.epub"),
             None,
             "test123".to_string(),
-            EncryptionProfile::Basic,
             Some(PathBuf::from("/tmp/moby-dick-decrypted.epub")),
             ROOT_CA_DER,
         )

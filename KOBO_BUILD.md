@@ -32,6 +32,28 @@ Libc symbols (`malloc`, `pthread_create`, `open`, etc.) are left as unresolved r
 
 ## Build Commands
 
+### Option A: Makefile (macOS Apple Silicon, no Docker)
+
+Prerequisites:
+- Rust ARM target: `rustup target add armv7-unknown-linux-gnueabihf`
+- ARM GCC cross-compiler:
+  ```bash
+  brew tap messense/macos-cross-toolchains
+  brew install arm-unknown-linux-gnueabihf
+  ```
+
+```bash
+# Build .so and copy to plugin folder
+make install
+
+# Or just build the .so
+make kobo
+```
+
+Output: `target/libreadium_lcp.so`, copied to `lcpreader.koplugin/libs/`.
+
+### Option B: Docker
+
 ```bash
 # Build the Docker image
 docker build --no-cache -f Dockerfile.kobo -t lcp-kobo .
@@ -45,7 +67,7 @@ Output: `out/libreadium_lcp.so`. Copy this file to the libs directory in `lcprea
 
 ## Deployment
 
-Copy `lcpreader.koplugin` folder to the plugins folder in `/mnt/onboard/.adds/koreader/libs/` on the Kobo.
+Copy `lcpreader.koplugin` folder to `/mnt/onboard/.adds/koreader/plugins/` on the Kobo.
 
 ## RUSTFLAGS
 

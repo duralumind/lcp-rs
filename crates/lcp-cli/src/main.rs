@@ -52,10 +52,6 @@ pub enum Commands {
         #[arg(long)]
         password: String,
 
-        /// Encryption profile used
-        #[arg(long)]
-        profile: EncryptionProfile,
-
         /// Output path (optional, defaults to <input>.decrypted.epub)
         #[arg(long)]
         output: Option<PathBuf>,
@@ -86,7 +82,6 @@ fn main() {
             input,
             lcpl,
             password,
-            profile,
             output,
         } => {
             let (epub_path, external_license) = match (input, lcpl) {
@@ -128,15 +123,7 @@ fn main() {
                 }
                 (Some(_), Some(_)) => unreachable!("clap conflicts_with prevents this"),
             };
-            decrypt_epub(
-                epub_path,
-                external_license,
-                password,
-                profile,
-                output,
-                ROOT_CA_DER,
-            )
-            .unwrap()
+            decrypt_epub(epub_path, external_license, password, output, ROOT_CA_DER).unwrap()
         }
     }
 }
