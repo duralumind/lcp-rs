@@ -12,9 +12,10 @@ use crate::{
 };
 use thiserror::Error;
 
-/// This is the trait that needs to be implemented to support additional
-/// production profiles. See docs for details.
-pub use crypto::transform::Transform;
+/// These are the types needed to support additional production profiles.
+/// Implement [`TransformResolver`] to map profile URIs to your [`Transform`].
+/// See docs for details.
+pub use crypto::transform::{BasicResolver, BasicTransform, Transform, TransformResolver};
 
 // Re-export module-specific error types
 pub use crypto::cipher::CipherError;
@@ -235,6 +236,7 @@ pub fn decrypt_epub(
     password: String,
     output: Option<PathBuf>,
     root_ca_der: &[u8],
+    resolver: &dyn TransformResolver,
 ) -> Result<(), Error> {
     let output_path = output.unwrap_or_else(|| {
         let stem = epub_path.file_stem().unwrap_or_default().to_string_lossy();
@@ -252,12 +254,14 @@ pub fn decrypt_epub(
             .license()
             .ok_or(EpubError::MissingRequiredFile("license.lcpl".to_string()))?,
     };
-    let profile = license.profile().map_err(Error::License)?;
+    let transform = resolver
+        .resolve(license.profile_uri())
+        .map_err(|e| Error::License(LicenseError::UnsupportedEncryptionProfile(e)))?;
     let passphrase = UserPassphrase(password);
     let root_cert =
         load_certificate_from_der(root_ca_der).expect("Failed to load root certificate");
     let user_encryption_key =
-        UserEncryptionKey::new(passphrase, crypto::key::HashAlgorithm::Sha256, profile);
+        UserEncryptionKey::new(passphrase, crypto::key::HashAlgorithm::Sha256, &*transform);
     license.key_check(&user_encryption_key)?;
     license.verify_signature_and_provider(&root_cert)?;
     let content_key = license.decrypt_content_key(&user_encryption_key)?;
@@ -294,6 +298,7 @@ mod tests {
             "test123".to_string(),
             Some(PathBuf::from("/tmp/moby-dick-decrypted.epub")),
             ROOT_CA_DER,
+            &BasicResolver,
         )
         .unwrap();
     }

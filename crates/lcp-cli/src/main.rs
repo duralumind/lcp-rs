@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use lcp_core::{decrypt_epub, encrypt_epub, license::EncryptionProfile};
+use lcp_core::{decrypt_epub, encrypt_epub, license::EncryptionProfile, BasicResolver};
 use std::path::PathBuf;
 
 const ROOT_CA_DER: &[u8] = include_bytes!("../../../certs/root_ca.der");
@@ -123,7 +123,8 @@ fn main() {
                 }
                 (Some(_), Some(_)) => unreachable!("clap conflicts_with prevents this"),
             };
-            decrypt_epub(epub_path, external_license, password, output, ROOT_CA_DER).unwrap()
+            decrypt_epub(epub_path, external_license, password, output, ROOT_CA_DER, &BasicResolver)
+                .unwrap()
         }
     }
 }

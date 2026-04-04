@@ -13,3 +13,42 @@
 pub trait Transform {
     fn transform(&self, user_key: [u8; 32]) -> [u8; 32];
 }
+
+impl<T: Transform + ?Sized> Transform for &T {
+    fn transform(&self, user_key: [u8; 32]) -> [u8; 32] {
+        (**self).transform(user_key)
+    }
+}
+
+/// Resolves a profile URI (from the license document) to the corresponding
+/// [`Transform`] implementation.
+///
+/// Implement this trait to support additional encryption profiles. The resolver
+/// is passed to [`decrypt_epub`](crate::decrypt_epub) and is called with the
+/// profile URI found in the license. Return the appropriate `Transform` for
+/// that profile, or an error string if the profile is unsupported.
+pub trait TransformResolver {
+    fn resolve(&self, profile_uri: &str) -> Result<Box<dyn Transform>, String>;
+}
+
+/// Identity transform used by the basic LCP profile.
+pub struct BasicTransform;
+
+impl Transform for BasicTransform {
+    fn transform(&self, user_key: [u8; 32]) -> [u8; 32] {
+        user_key
+    }
+}
+
+/// Default resolver that only supports the basic LCP profile
+/// (`http://readium.org/lcp/basic-profile`).
+pub struct BasicResolver;
+
+impl TransformResolver for BasicResolver {
+    fn resolve(&self, profile_uri: &str) -> Result<Box<dyn Transform>, String> {
+        match profile_uri {
+            "http://readium.org/lcp/basic-profile" => Ok(Box::new(BasicTransform)),
+            other => Err(format!("Unknown encryption profile: {}", other)),
+        }
+    }
+}
