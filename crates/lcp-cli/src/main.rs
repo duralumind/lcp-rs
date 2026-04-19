@@ -1,10 +1,13 @@
 use clap::{Parser, Subcommand};
-use lcp_core::{decrypt_epub, encrypt_epub, license::EncryptionProfile, BasicResolver};
+use lcp_core::{BasicResolver, decrypt_epub, encrypt_epub};
 use std::path::PathBuf;
 
 const ROOT_CA_DER: &[u8] = include_bytes!("../../../certs/root_ca.der");
 const PROVIDER_CERT_DER: &[u8] = include_bytes!("../../../certs/provider.der");
 const PROVIDER_PRIVATE_KEY_DER: &[u8] = include_bytes!("../../../certs/provider_private.der");
+
+/// The default encryption profile URI for the basic LCP profile.
+const DEFAULT_PROFILE_URI: &str = "http://readium.org/lcp/basic-profile";
 
 #[derive(Parser, Debug)]
 #[command(name = "lcp-cli")]
@@ -29,9 +32,9 @@ pub enum Commands {
         #[arg(long)]
         password_hint: String,
 
-        /// Encryption profile to use
-        #[arg(long)]
-        profile: EncryptionProfile,
+        /// Encryption profile URI (defaults to basic profile)
+        #[arg(long, default_value = DEFAULT_PROFILE_URI)]
+        profile: String,
 
         /// Output path (optional, defaults to <input>.encrypted.epub)
         #[arg(long)]
@@ -72,7 +75,8 @@ fn main() {
             input,
             password,
             password_hint,
-            profile,
+            &profile,
+            &BasicResolver,
             output,
             PROVIDER_CERT_DER,
             PROVIDER_PRIVATE_KEY_DER,
@@ -123,8 +127,15 @@ fn main() {
                 }
                 (Some(_), Some(_)) => unreachable!("clap conflicts_with prevents this"),
             };
-            decrypt_epub(epub_path, external_license, password, output, ROOT_CA_DER, &BasicResolver)
-                .unwrap()
+            decrypt_epub(
+                epub_path,
+                external_license,
+                password,
+                output,
+                ROOT_CA_DER,
+                &BasicResolver,
+            )
+            .unwrap()
         }
     }
 }

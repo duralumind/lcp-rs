@@ -24,9 +24,35 @@ impl<T: Transform + ?Sized> Transform for &T {
 /// [`Transform`] implementation.
 ///
 /// Implement this trait to support additional encryption profiles. The resolver
-/// is passed to [`decrypt_epub`](crate::decrypt_epub) and is called with the
-/// profile URI found in the license. Return the appropriate `Transform` for
+/// is passed to [`decrypt_epub`](crate::decrypt_epub) and [`encrypt_epub`](crate::encrypt_epub)
+/// and is called with the profile URI. Return the appropriate `Transform` for
 /// that profile, or an error string if the profile is unsupported.
+///
+/// # Example
+///
+/// ```
+/// use lcp_core::{Transform, TransformResolver, BasicTransform};
+///
+/// struct SuperSafeTransform;
+/// impl Transform for SuperSafeTransform {
+///     fn transform(&self, user_key: [u8; 32]) -> [u8; 32] {
+///         let mut new_key = user_key.clone();
+///         new_key.reverse();
+///         new_key
+///     }
+/// }
+///
+/// pub struct SuperSafeResolver;
+/// impl TransformResolver for SuperSafeResolver {
+///     fn resolve(&self, profile_uri: &str) -> Result<Box<dyn Transform>, String> {
+///         match profile_uri {
+///             "http://readium.org/lcp/basic-profile" => Ok(Box::new(BasicTransform)),
+///             "http://mysite.xyz/lcp/super-safe-profile" => Ok(Box::new(SuperSafeTransform)),
+///             other => Err(format!("Unknown profile: {}", other)),
+///         }
+///     }
+/// }
+/// ```
 pub trait TransformResolver {
     fn resolve(&self, profile_uri: &str) -> Result<Box<dyn Transform>, String>;
 }

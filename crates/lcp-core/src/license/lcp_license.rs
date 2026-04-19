@@ -400,7 +400,9 @@ impl LicenseBuilder {
         encrypted_key: &EncryptedContentKey,
         user_key: &UserEncryptionKey,
         hint: String,
+        profile_uri: &str,
     ) -> Self {
+        self.0.encryption.profile = profile_uri.to_string();
         self.0.encryption.content_key.encrypted_value = encrypted_key.to_base64();
         let key_check =
             aes_cbc256::encrypt_aes_256_cbc_with_random_iv(self.0.id.as_bytes(), user_key.key());

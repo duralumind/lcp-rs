@@ -9,9 +9,9 @@ use std::os::raw::c_char;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+use lcp_core::TransformResolver;
 use lcp_core::crypto::key::{UserEncryptionKey, UserPassphrase};
 use lcp_core::epub::Epub;
-use lcp_core::TransformResolver;
 
 // Global error storage (using Mutex instead of thread_local to avoid TLS init issues on old ARM)
 static LAST_ERROR: Mutex<Option<CString>> = Mutex::new(None);
