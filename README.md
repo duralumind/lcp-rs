@@ -9,13 +9,6 @@ A Rust implementation of the Readium LCP (Licensed Content Protection) [specific
 - Extensible `Transform` and `TransformResolver` trait for proprietary profiles
 - KOReader plugin for Kobo e-readers
 
-## Workspace Structure
-
-│   ├── lcp-core/       # Core library: encryption, decryption, license/LSD handling
-│   ├── lcp-cli/        # Command-line tool
-│   └── plugin/         # FFI library for KOReader
-└── lcpreader.koplugin/ # KOReader Lua plugin
-
 ## KOReader Plugin
 
 Plugin for reading LCP-protected EPUBs on KOReader.
