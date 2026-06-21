@@ -43,6 +43,12 @@ pub enum LicenseError {
     /// Cipher operation failed
     #[error("Signature validation failed: {0}")]
     SignatureValidationError(String),
+    /// Unsupported content-key algorithm URI in the license.
+    #[error("Unsupported content-key algorithm: {0}")]
+    UnsupportedContentKeyAlgorithm(String),
+    /// Unsupported user-key algorithm URI in the license.
+    #[error("Unsupported user-key algorithm: {0}")]
+    UnsupportedUserKeyAlgorithm(String),
     #[error("Unsupported encryption profile: {0}")]
     UnsupportedEncryptionProfile(String),
 }
@@ -212,6 +218,14 @@ impl Signature {
     pub fn decode_certificate(&self) -> Result<Certificate, String> {
         Ok(self.certificate.clone())
     }
+
+    pub fn algorithm_uri(&self) -> &str {
+        &self.algorithm
+    }
+
+    pub fn certificate(&self) -> &Certificate {
+        &self.certificate
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
@@ -281,11 +295,58 @@ impl License {
         &self.encryption.profile
     }
 
+    /// Returns the user-visible passphrase hint from the license.
+    pub fn user_key_hint(&self) -> &str {
+        &self.encryption.user_key.text_hint
+    }
+
+    /// Returns the user-key algorithm URI from the license.
+    pub fn user_key_algorithm_uri(&self) -> &str {
+        &self.encryption.user_key.algorithm
+    }
+
+    /// Returns the content-key algorithm URI from the license.
+    pub fn content_key_algorithm_uri(&self) -> &str {
+        &self.encryption.content_key.algorithm
+    }
+
+    /// Returns the signature algorithm URI, if the license is signed.
+    pub fn signature_algorithm_uri(&self) -> Option<&str> {
+        self.signature.as_ref().map(Signature::algorithm_uri)
+    }
+
+    /// Returns the provider certificate from the license signature, if present.
+    pub fn provider_certificate(&self) -> Option<&Certificate> {
+        self.signature.as_ref().map(Signature::certificate)
+    }
+
+    fn validate_user_key_algorithm(&self) -> Result<(), LicenseError> {
+        if self.encryption.user_key.algorithm == DEFAULT_HASH_ALGORITHM {
+            Ok(())
+        } else {
+            Err(LicenseError::UnsupportedUserKeyAlgorithm(
+                self.encryption.user_key.algorithm.clone(),
+            ))
+        }
+    }
+
+    fn validate_content_key_algorithm(&self) -> Result<(), LicenseError> {
+        if self.encryption.content_key.algorithm == DEFAULT_ENCRYPTION_ALGORITHM {
+            Ok(())
+        } else {
+            Err(LicenseError::UnsupportedContentKeyAlgorithm(
+                self.encryption.content_key.algorithm.clone(),
+            ))
+        }
+    }
+
     /// Check that the `key_check` bytes decrypted with the user encryption key is
     /// the license id.
     ///
     /// This check is part of the validity conditions for a License document.
     pub fn key_check(&self, user_key: &UserEncryptionKey) -> Result<(), LicenseError> {
+        self.validate_user_key_algorithm()?;
+
         let key_check_bytes = general_purpose::STANDARD
             .decode(&self.encryption.user_key.key_check)
             .map_err(|e| LicenseError::Base64DecodeFailed(format!("{:?}", e)))?;
@@ -295,7 +356,7 @@ impl License {
                 &key_check_bytes,
                 user_key.key(),
             )
-            .map_err(|e| LicenseError::CipherFailed(e.to_string()))?;
+            .map_err(|_| LicenseError::KeyCheckFailed)?;
 
         if decrypted_bytes.as_slice() == self.id.as_bytes() {
             Ok(())
@@ -310,6 +371,9 @@ impl License {
         &self,
         user_key: &UserEncryptionKey,
     ) -> Result<ContentKey, LicenseError> {
+        self.validate_user_key_algorithm()?;
+        self.validate_content_key_algorithm()?;
+
         // Base64-decode the encrypted content key
         let encrypted_content_key =
             EncryptedContentKey::new_from_raw_bytes(&self.encryption.content_key.encrypted_value)
@@ -580,5 +644,42 @@ mod tests {
         });
         let signature: Result<Signature, _> = serde_json::from_value(signature_json);
         assert!(signature.is_ok());
+    }
+
+    #[test]
+    fn key_check_rejects_unsupported_user_key_algorithm() {
+        let mut license = License::default();
+        license.encryption.user_key.algorithm = "http://example.com/sha512".to_string();
+
+        let user_key = UserEncryptionKey::new(
+            crate::crypto::key::UserPassphrase("password123".to_string()),
+            crate::crypto::key::HashAlgorithm::Sha256,
+            crate::BasicTransform,
+        );
+
+        let err = license.key_check(&user_key).unwrap_err();
+        assert!(matches!(
+            err,
+            LicenseError::UnsupportedUserKeyAlgorithm(ref value)
+                if value == "http://example.com/sha512"
+        ));
+    }
+
+    #[test]
+    fn decrypt_content_key_rejects_unsupported_content_key_algorithm() {
+        let mut license = License::default();
+        license.encryption.content_key.algorithm = "http://example.com/aes128-cbc".to_string();
+
+        let user_key = UserEncryptionKey::new(
+            crate::crypto::key::UserPassphrase("password123".to_string()),
+            crate::crypto::key::HashAlgorithm::Sha256,
+            crate::BasicTransform,
+        );
+
+        assert!(matches!(
+            license.decrypt_content_key(&user_key),
+            Err(LicenseError::UnsupportedContentKeyAlgorithm(ref value))
+                if value == "http://example.com/aes128-cbc"
+        ));
     }
 }
