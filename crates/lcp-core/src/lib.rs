@@ -5,7 +5,7 @@ pub mod license;
 use crate::{
     crypto::{
         key::{ContentKey, EncryptedContentKey, UserEncryptionKey, UserPassphrase},
-        signature::{load_certificate_from_der, load_private_key_from_der},
+        signature::{load_certificate_from_der, load_signing_key_from_der},
     },
     epub::Epub,
     license::{License, LicenseBuilder},
@@ -85,10 +85,10 @@ pub fn encrypt_epub(
         EncryptedContentKey::new(content_key.clone(), passphrase, &*transform);
     let encrypted_epub = epub.create_encrypted_epub(output_path, &content_key)?;
 
-    let private_key =
-        load_private_key_from_der(provider_private_key_der).map_err(Error::Signature)?;
     let provider_certificate =
         load_certificate_from_der(provider_cert_der).map_err(Error::Signature)?;
+    let private_key = load_signing_key_from_der(provider_private_key_der, &provider_certificate)
+        .map_err(Error::Signature)?;
     let license = LicenseBuilder::new()
         .encryption(
             &encrypted_content_key,

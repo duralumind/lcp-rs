@@ -1,4 +1,3 @@
-use rsa::RsaPrivateKey;
 use std::collections::HashMap;
 use thiserror::Error;
 use uuid::Uuid;
@@ -6,7 +5,7 @@ use uuid::Uuid;
 use super::encoding::{certificate_format, date_format, optional_date_format};
 use crate::crypto::cipher::aes_cbc256;
 use crate::crypto::key::{ContentKey, EncryptedContentKey, UserEncryptionKey};
-use crate::crypto::signature::{RSA_SHA256_ALGORITHM, sign_license};
+use crate::crypto::signature::{ProviderSigningKey, sign_license};
 use crate::{crypto, epub};
 use base64::{Engine as _, engine::general_purpose};
 use chrono::{DateTime, FixedOffset, Utc};
@@ -61,6 +60,23 @@ pub const DEFAULT_ENCRYPTION_PROFILE: &str = "http://readium.org/lcp/basic-profi
 #[derive(Debug, Serialize, Deserialize)]
 pub enum EncryptionAlgorithm {
     AesCbc,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SignatureAlgorithm {
+    #[serde(rename = "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256")]
+    RsaSha256,
+    #[serde(rename = "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256")]
+    EcdsaSha256,
+}
+
+impl SignatureAlgorithm {
+    pub fn as_uri(self) -> &'static str {
+        match self {
+            Self::RsaSha256 => "http://www.w3.org/2001/04/xmldsig-more#rsa-sha256",
+            Self::EcdsaSha256 => "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256",
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -205,7 +221,7 @@ pub struct Signature {
     /// Algorithm used to calculate the signature, identified using the URIs
     /// given in [XML-SIG]. This must match the signature algorithm named in
     /// the Encryption Profile identified in encryption/profile.
-    algorithm: String,
+    algorithm: SignatureAlgorithm,
     /// The Provider Certificate: an X509 certificate used by the Content Provider.
     /// Base 64 encoded DER certificate.
     #[serde(with = "certificate_format")]
@@ -220,11 +236,19 @@ impl Signature {
     }
 
     pub fn algorithm_uri(&self) -> &str {
-        &self.algorithm
+        self.algorithm.as_uri()
+    }
+
+    pub fn algorithm(&self) -> SignatureAlgorithm {
+        self.algorithm
     }
 
     pub fn certificate(&self) -> &Certificate {
         &self.certificate
+    }
+
+    pub fn value(&self) -> &str {
+        &self.value
     }
 }
 
@@ -315,6 +339,11 @@ impl License {
         self.signature.as_ref().map(Signature::algorithm_uri)
     }
 
+    /// Returns the signature algorithm from the license, if the license is signed.
+    pub fn signature_algorithm(&self) -> Option<SignatureAlgorithm> {
+        self.signature.as_ref().map(Signature::algorithm)
+    }
+
     /// Returns the provider certificate from the license signature, if present.
     pub fn provider_certificate(&self) -> Option<&Certificate> {
         self.signature.as_ref().map(Signature::certificate)
@@ -403,6 +432,7 @@ impl License {
         crypto::signature::verify_license_signature(
             self.canonical_json()?.as_bytes(),
             &signature.value,
+            signature.algorithm,
             &signature.certificate,
         )
         .map_err(|e| {
@@ -479,13 +509,13 @@ impl LicenseBuilder {
     /// Sets the `signature` on the license with the provider private key.
     pub fn sign(
         mut self,
-        private_key: &RsaPrivateKey,
+        private_key: &ProviderSigningKey,
         provider_certificate: &Certificate,
     ) -> Result<Self, LicenseError> {
         let signature = sign_license(self.0.canonical_json()?.as_bytes(), private_key)
             .map_err(|e| LicenseError::SigningFailed(e.to_string()))?;
         let sig = Signature {
-            algorithm: RSA_SHA256_ALGORITHM.to_string(),
+            algorithm: private_key.algorithm(),
             certificate: provider_certificate.clone(),
             value: signature,
         };
