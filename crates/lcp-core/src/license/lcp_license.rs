@@ -356,7 +356,7 @@ impl License {
                 &key_check_bytes,
                 user_key.key(),
             )
-            .map_err(|e| LicenseError::CipherFailed(e.to_string()))?;
+            .map_err(|_| LicenseError::KeyCheckFailed)?;
 
         if decrypted_bytes.as_slice() == self.id.as_bytes() {
             Ok(())
