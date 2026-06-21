@@ -281,7 +281,10 @@ mod tests {
     #[test]
     fn encrypted_content_key_rejects_short_iv_blob() {
         let result = EncryptedContentKey::new_from_bytes(&[1; 8]);
-        assert!(matches!(result, Err(KeyError::InvalidIvLength { actual: 8 })));
+        assert!(matches!(
+            result,
+            Err(KeyError::InvalidIvLength { actual: 8 })
+        ));
     }
 
     #[test]

@@ -218,6 +218,14 @@ impl Signature {
     pub fn decode_certificate(&self) -> Result<Certificate, String> {
         Ok(self.certificate.clone())
     }
+
+    pub fn algorithm_uri(&self) -> &str {
+        &self.algorithm
+    }
+
+    pub fn certificate(&self) -> &Certificate {
+        &self.certificate
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
@@ -285,6 +293,31 @@ impl License {
     /// Returns the raw profile URI string from the license document.
     pub fn profile_uri(&self) -> &str {
         &self.encryption.profile
+    }
+
+    /// Returns the user-visible passphrase hint from the license.
+    pub fn user_key_hint(&self) -> &str {
+        &self.encryption.user_key.text_hint
+    }
+
+    /// Returns the user-key algorithm URI from the license.
+    pub fn user_key_algorithm_uri(&self) -> &str {
+        &self.encryption.user_key.algorithm
+    }
+
+    /// Returns the content-key algorithm URI from the license.
+    pub fn content_key_algorithm_uri(&self) -> &str {
+        &self.encryption.content_key.algorithm
+    }
+
+    /// Returns the signature algorithm URI, if the license is signed.
+    pub fn signature_algorithm_uri(&self) -> Option<&str> {
+        self.signature.as_ref().map(Signature::algorithm_uri)
+    }
+
+    /// Returns the provider certificate from the license signature, if present.
+    pub fn provider_certificate(&self) -> Option<&Certificate> {
+        self.signature.as_ref().map(Signature::certificate)
     }
 
     fn validate_user_key_algorithm(&self) -> Result<(), LicenseError> {
