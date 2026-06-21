@@ -14,16 +14,23 @@ pub enum KeyError {
     /// Base64 decoding failed
     #[error("Base64 decode failed: {0}")]
     Base64DecodeFailed(String),
-    /// Invalid key length
-    #[error("Invalid key length: expected {expected}, got {actual}")]
-    InvalidKeyLength { expected: usize, actual: usize },
+    /// Invalid IV length in the encrypted content key blob.
+    #[error("Invalid IV length: got {actual} bytes, expected 16")]
+    InvalidIvLength { actual: usize },
+    /// Invalid encrypted content-key ciphertext length.
+    #[error("Invalid encrypted content-key length: got {actual} bytes, expected 48")]
+    InvalidEncryptedKeyLength { actual: usize },
+    /// Invalid decrypted content-key length.
+    #[error("Invalid content key length: got {actual} bytes, expected 32")]
+    InvalidContentKeyLength { actual: usize },
     /// Decryption of key material failed
     #[error("Decryption failed: {0}")]
     DecryptionFailed(String),
-    /// Failed to extract bytes from data
-    #[error("Failed to extract bytes: {0}")]
-    ByteExtractionFailed(String),
 }
+
+const IV_LEN: usize = 16;
+const ENCRYPTED_CONTENT_KEY_LEN: usize = 48;
+const CONTENT_KEY_LEN: usize = 32;
 
 /// The password chosen by the user to encrypt/decrypt the publication.
 #[derive(Clone, Serialize, Deserialize, Zeroize)]
@@ -98,8 +105,18 @@ impl ContentKey {
             encrypted_key.iv(),
         )
         .map_err(|e| KeyError::DecryptionFailed(e.to_string()))?;
-        let mut content_key = [0; 32];
-        content_key.copy_from_slice(&decrypted);
+        Self::from_decrypted_bytes(&decrypted)
+    }
+
+    fn from_decrypted_bytes(bytes: &[u8]) -> Result<Self, KeyError> {
+        if bytes.len() != CONTENT_KEY_LEN {
+            return Err(KeyError::InvalidContentKeyLength {
+                actual: bytes.len(),
+            });
+        }
+
+        let mut content_key = [0; CONTENT_KEY_LEN];
+        content_key.copy_from_slice(bytes);
         Ok(ContentKey(content_key))
     }
 }
@@ -122,19 +139,27 @@ impl EncryptedContentKey {
             .decode(base64_encrypted_key)
             .map_err(|e| KeyError::Base64DecodeFailed(format!("{:?}", e)))?;
 
-        if encrypted_key_bytes.len() != 64 {
-            return Err(KeyError::InvalidKeyLength {
-                expected: 64,
+        Self::new_from_bytes(&encrypted_key_bytes)
+    }
+
+    fn new_from_bytes(encrypted_key_bytes: &[u8]) -> Result<Self, KeyError> {
+        if encrypted_key_bytes.len() < IV_LEN {
+            return Err(KeyError::InvalidIvLength {
                 actual: encrypted_key_bytes.len(),
             });
         }
-        let (iv_slice, key_slice) = encrypted_key_bytes.split_at(16);
-        let key = key_slice
-            .try_into()
-            .map_err(|_| KeyError::ByteExtractionFailed("key bytes".to_string()))?;
-        let iv = iv_slice
-            .try_into()
-            .map_err(|_| KeyError::ByteExtractionFailed("iv bytes".to_string()))?;
+
+        let (iv_slice, key_slice) = encrypted_key_bytes.split_at(IV_LEN);
+        if key_slice.len() != ENCRYPTED_CONTENT_KEY_LEN {
+            return Err(KeyError::InvalidEncryptedKeyLength {
+                actual: key_slice.len(),
+            });
+        }
+
+        let mut iv = [0; IV_LEN];
+        iv.copy_from_slice(iv_slice);
+        let mut key = [0; ENCRYPTED_CONTENT_KEY_LEN];
+        key.copy_from_slice(key_slice);
 
         Ok(Self { key, iv })
     }
@@ -184,9 +209,7 @@ impl EncryptedContentKey {
         let decrypted =
             cipher::aes_cbc256::decrypt_aes_256_cbc(&self.key, user_key.key(), &self.iv)
                 .map_err(|e| KeyError::DecryptionFailed(e.to_string()))?;
-        let mut content_key = [0; 32];
-        content_key.copy_from_slice(&decrypted);
-        Ok(ContentKey(content_key))
+        ContentKey::from_decrypted_bytes(&decrypted)
     }
 
     /// Encodes the encrypted content key in base64 format (IV || ciphertext)
@@ -203,6 +226,10 @@ impl EncryptedContentKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::crypto::cipher::aes_cbc256;
+
+    const TEST_IV: [u8; IV_LEN] = [7; IV_LEN];
+    const TEST_USER_KEY: [u8; 32] = [3; 32];
 
     #[test]
     fn roundtrip_no_transform() {
@@ -249,5 +276,43 @@ mod tests {
             .decrypt_content_key(UserPassphrase("password123".to_string()), ShaTransform)
             .unwrap();
         assert_eq!(decrypted_content_key.key(), content_key.key());
+    }
+
+    #[test]
+    fn encrypted_content_key_rejects_short_iv_blob() {
+        let result = EncryptedContentKey::new_from_bytes(&[1; 8]);
+        assert!(matches!(result, Err(KeyError::InvalidIvLength { actual: 8 })));
+    }
+
+    #[test]
+    fn encrypted_content_key_rejects_wrong_ciphertext_length() {
+        let mut bytes = vec![0; IV_LEN];
+        bytes.extend_from_slice(&[1; ENCRYPTED_CONTENT_KEY_LEN - 1]);
+
+        assert!(matches!(
+            EncryptedContentKey::new_from_bytes(&bytes),
+            Err(KeyError::InvalidEncryptedKeyLength { actual: 47 })
+        ));
+    }
+
+    #[test]
+    fn encrypted_content_key_rejects_bad_base64() {
+        let result = EncryptedContentKey::new_from_raw_bytes("%%%");
+        assert!(matches!(result, Err(KeyError::Base64DecodeFailed(_))));
+    }
+
+    #[test]
+    fn decrypt_content_key_rejects_wrong_plaintext_length() {
+        let wrong_length_plaintext = [9; 33];
+        let encrypted =
+            aes_cbc256::encrypt_aes_256_cbc(&wrong_length_plaintext, &TEST_USER_KEY, &TEST_IV);
+        let key: [u8; ENCRYPTED_CONTENT_KEY_LEN] = encrypted.try_into().unwrap();
+        let encrypted_content_key = EncryptedContentKey { key, iv: TEST_IV };
+        let user_key = UserEncryptionKey { key: TEST_USER_KEY };
+
+        assert!(matches!(
+            ContentKey::decrypt_content_key(&encrypted_content_key, &user_key),
+            Err(KeyError::InvalidContentKeyLength { actual: 33 })
+        ));
     }
 }
