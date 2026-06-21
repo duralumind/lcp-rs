@@ -873,6 +873,7 @@ dependencies = [
  "block-padding",
  "cbc",
  "chrono",
+ "const-oid",
  "flate2",
  "hex",
  "p521",

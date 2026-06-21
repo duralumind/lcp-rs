@@ -4,6 +4,7 @@
 //! based on the typed license model.
 
 use base64::engine::general_purpose;
+use const_oid::db::rfc5912::{ID_EC_PUBLIC_KEY, RSA_ENCRYPTION, SECP_521_R_1};
 use p521::ecdsa::SigningKey as P521SigningKey;
 use rsa::RsaPrivateKey;
 use thiserror::Error;
@@ -20,10 +21,6 @@ pub enum ProviderSigningKey {
     RsaSha256(RsaPrivateKey),
 }
 
-const EC_PUBLIC_KEY_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.10045.2.1");
-const P521_CURVE_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.3.132.0.35");
-const RSA_PUBLIC_KEY_OID: ObjectIdentifier = ObjectIdentifier::new_unwrap("1.2.840.113549.1.1.1");
-
 impl ProviderSigningKey {
     pub fn algorithm(&self) -> SignatureAlgorithm {
         match self {
@@ -31,6 +28,138 @@ impl ProviderSigningKey {
             Self::RsaSha256(_) => SignatureAlgorithm::RsaSha256,
         }
     }
+}
+
+/// Sign the canonical JSON bytes using RSA-SHA256 (PKCS#1 v1.5).
+///
+/// # Arguments
+/// * `canonical_json` - The canonical form of the license document (as bytes)
+/// * `private_key` - The provider's RSA private key
+///
+/// # Returns
+/// Base64-encoded signature value
+pub fn sign_license(
+    canonical_json: &[u8],
+    private_key: &ProviderSigningKey,
+) -> Result<String, SignatureError> {
+    match private_key {
+        ProviderSigningKey::EcdsaP521(private_key) => {
+            ecdsa_sha256::sign_license(canonical_json, private_key)
+        }
+        ProviderSigningKey::RsaSha256(private_key) => {
+            rsa_sha256::sign_license(canonical_json, private_key)
+        }
+    }
+}
+
+/// Verify a license signature using the provider's certificate.
+///
+/// # Arguments
+/// * `canonical_json` - The canonical form of the license document (as bytes)
+/// * `signature_value` - Base64-encoded signature from the license
+/// * `certificate` - The provider's X.509 certificate containing the public key
+///
+/// # Returns
+/// `Ok(())` if the signature is valid, `Err` otherwise
+pub fn verify_license_signature(
+    canonical_json: &[u8],
+    signature_value: &str,
+    algorithm: SignatureAlgorithm,
+    certificate: &Certificate,
+) -> Result<(), SignatureError> {
+    match algorithm {
+        SignatureAlgorithm::RsaSha256 => {
+            rsa_sha256::verify_license_signature(canonical_json, signature_value, certificate)
+        }
+        SignatureAlgorithm::EcdsaSha256 => {
+            ecdsa_sha256::verify_license_signature(canonical_json, signature_value, certificate)
+        }
+    }
+}
+
+/// Validate that a provider certificate was signed by the root certificate.
+///
+/// # Arguments
+/// * `provider_cert` - The provider's certificate (from the license)
+/// * `root_cert` - The root CA certificate (embedded in the reader)
+///
+/// # Returns
+/// `Ok(())` if the provider certificate is valid, `Err` otherwise
+pub fn validate_provider_certificate(
+    provider_cert: &Certificate,
+    root_cert: &Certificate,
+) -> Result<(), SignatureError> {
+    rsa_sha256::validate_provider_certificate(provider_cert, root_cert)
+}
+
+/// Load a provider signing key from DER-encoded PKCS#8 bytes using the
+/// provider certificate's public-key algorithm to select the key type.
+pub fn load_signing_key_from_der(
+    der_bytes: &[u8],
+    provider_certificate: &Certificate,
+) -> Result<ProviderSigningKey, SignatureError> {
+    let algorithm = &provider_certificate
+        .tbs_certificate
+        .subject_public_key_info
+        .algorithm;
+
+    if algorithm.oid == ID_EC_PUBLIC_KEY {
+        let curve_oid = algorithm
+            .parameters
+            .as_ref()
+            .ok_or_else(|| {
+                SignatureError::CertificateError(
+                    "Missing EC curve parameters in provider certificate".to_string(),
+                )
+            })?
+            .decode_as::<ObjectIdentifier>()
+            .map_err(|e| {
+                SignatureError::CertificateError(format!(
+                    "Failed to read EC curve OID from provider certificate: {}",
+                    e
+                ))
+            })?;
+
+        if curve_oid != SECP_521_R_1 {
+            return Err(SignatureError::CertificateError(format!(
+                "Unsupported EC curve in provider certificate: {}",
+                curve_oid
+            )));
+        }
+
+        use p521::SecretKey;
+        use p521::pkcs8::DecodePrivateKey;
+
+        let secret_key = SecretKey::from_pkcs8_der(der_bytes).map_err(|e| {
+            SignatureError::KeyError(format!("Failed to load P-521 private key: {}", e))
+        })?;
+        let signing_key = P521SigningKey::from_bytes(&secret_key.to_bytes()).map_err(|e| {
+            SignatureError::KeyError(format!("Failed to construct P-521 signing key: {}", e))
+        })?;
+        return Ok(ProviderSigningKey::EcdsaP521(signing_key));
+    }
+
+    if algorithm.oid == RSA_ENCRYPTION {
+        use rsa::pkcs8::DecodePrivateKey;
+
+        return RsaPrivateKey::from_pkcs8_der(der_bytes)
+            .map(ProviderSigningKey::RsaSha256)
+            .map_err(|e| {
+                SignatureError::KeyError(format!("Failed to load RSA private key: {}", e))
+            });
+    }
+
+    Err(SignatureError::CertificateError(format!(
+        "Unsupported provider certificate public-key algorithm OID: {}",
+        algorithm.oid
+    )))
+}
+
+/// Load an X.509 certificate from DER-encoded bytes.
+pub fn load_certificate_from_der(der_bytes: &[u8]) -> Result<Certificate, SignatureError> {
+    Certificate::from_der(der_bytes).map_err(|e| {
+        SignatureError::CertificateError(format!("Failed to parse certificate: {}", e))
+    })
 }
 
 mod rsa_sha256 {
@@ -199,138 +328,6 @@ mod ecdsa_sha256 {
                 SignatureError::VerificationFailed(format!("Signature verification failed: {}", e))
             })
     }
-}
-
-/// Sign the canonical JSON bytes using RSA-SHA256 (PKCS#1 v1.5).
-///
-/// # Arguments
-/// * `canonical_json` - The canonical form of the license document (as bytes)
-/// * `private_key` - The provider's RSA private key
-///
-/// # Returns
-/// Base64-encoded signature value
-pub fn sign_license(
-    canonical_json: &[u8],
-    private_key: &ProviderSigningKey,
-) -> Result<String, SignatureError> {
-    match private_key {
-        ProviderSigningKey::EcdsaP521(private_key) => {
-            ecdsa_sha256::sign_license(canonical_json, private_key)
-        }
-        ProviderSigningKey::RsaSha256(private_key) => {
-            rsa_sha256::sign_license(canonical_json, private_key)
-        }
-    }
-}
-
-/// Verify a license signature using the provider's certificate.
-///
-/// # Arguments
-/// * `canonical_json` - The canonical form of the license document (as bytes)
-/// * `signature_value` - Base64-encoded signature from the license
-/// * `certificate` - The provider's X.509 certificate containing the public key
-///
-/// # Returns
-/// `Ok(())` if the signature is valid, `Err` otherwise
-pub fn verify_license_signature(
-    canonical_json: &[u8],
-    signature_value: &str,
-    algorithm: SignatureAlgorithm,
-    certificate: &Certificate,
-) -> Result<(), SignatureError> {
-    match algorithm {
-        SignatureAlgorithm::RsaSha256 => {
-            rsa_sha256::verify_license_signature(canonical_json, signature_value, certificate)
-        }
-        SignatureAlgorithm::EcdsaSha256 => {
-            ecdsa_sha256::verify_license_signature(canonical_json, signature_value, certificate)
-        }
-    }
-}
-
-/// Validate that a provider certificate was signed by the root certificate.
-///
-/// # Arguments
-/// * `provider_cert` - The provider's certificate (from the license)
-/// * `root_cert` - The root CA certificate (embedded in the reader)
-///
-/// # Returns
-/// `Ok(())` if the provider certificate is valid, `Err` otherwise
-pub fn validate_provider_certificate(
-    provider_cert: &Certificate,
-    root_cert: &Certificate,
-) -> Result<(), SignatureError> {
-    rsa_sha256::validate_provider_certificate(provider_cert, root_cert)
-}
-
-/// Load a provider signing key from DER-encoded PKCS#8 bytes using the
-/// provider certificate's public-key algorithm to select the key type.
-pub fn load_signing_key_from_der(
-    der_bytes: &[u8],
-    provider_certificate: &Certificate,
-) -> Result<ProviderSigningKey, SignatureError> {
-    let algorithm = &provider_certificate
-        .tbs_certificate
-        .subject_public_key_info
-        .algorithm;
-
-    if algorithm.oid == EC_PUBLIC_KEY_OID {
-        let curve_oid = algorithm
-            .parameters
-            .as_ref()
-            .ok_or_else(|| {
-                SignatureError::CertificateError(
-                    "Missing EC curve parameters in provider certificate".to_string(),
-                )
-            })?
-            .decode_as::<ObjectIdentifier>()
-            .map_err(|e| {
-                SignatureError::CertificateError(format!(
-                    "Failed to read EC curve OID from provider certificate: {}",
-                    e
-                ))
-            })?;
-
-        if curve_oid != P521_CURVE_OID {
-            return Err(SignatureError::CertificateError(format!(
-                "Unsupported EC curve in provider certificate: {}",
-                curve_oid
-            )));
-        }
-
-        use p521::SecretKey;
-        use p521::pkcs8::DecodePrivateKey;
-
-        let secret_key = SecretKey::from_pkcs8_der(der_bytes).map_err(|e| {
-            SignatureError::KeyError(format!("Failed to load P-521 private key: {}", e))
-        })?;
-        let signing_key = P521SigningKey::from_bytes(&secret_key.to_bytes()).map_err(|e| {
-            SignatureError::KeyError(format!("Failed to construct P-521 signing key: {}", e))
-        })?;
-        return Ok(ProviderSigningKey::EcdsaP521(signing_key));
-    }
-
-    if algorithm.oid == RSA_PUBLIC_KEY_OID {
-        use rsa::pkcs8::DecodePrivateKey;
-
-        return RsaPrivateKey::from_pkcs8_der(der_bytes)
-            .map(ProviderSigningKey::RsaSha256)
-            .map_err(|e| {
-                SignatureError::KeyError(format!("Failed to load RSA private key: {}", e))
-            });
-    }
-
-    Err(SignatureError::CertificateError(format!(
-        "Unsupported provider certificate public-key algorithm OID: {}",
-        algorithm.oid
-    )))
-}
-
-/// Load an X.509 certificate from DER-encoded bytes.
-pub fn load_certificate_from_der(der_bytes: &[u8]) -> Result<Certificate, SignatureError> {
-    Certificate::from_der(der_bytes).map_err(|e| {
-        SignatureError::CertificateError(format!("Failed to parse certificate: {}", e))
-    })
 }
 
 /// Errors that can occur during signing or verification.
