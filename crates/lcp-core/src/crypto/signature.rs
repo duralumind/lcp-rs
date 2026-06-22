@@ -439,6 +439,15 @@ mod tests {
     const PROVIDER_CERT_DER: &[u8] = include_bytes!("../../../../certs/provider.der");
     const PROVIDER_PRIVATE_KEY_DER: &[u8] =
         include_bytes!("../../../../certs/provider_private.der");
+    const ECDSA_ROOT_CA_DER_B64: &str = "MIICGTCCAXqgAwIBAgIUUm4GgREwIWLkVeuudcnhvdEWsc0wCgYIKoZIzj0EAwIwHjEcMBoGA1UEAwwTTENQIFRlc3QgRUNEU0EgUm9vdDAeFw0yNjA2MjIwMDE0MTNaFw0zNjA2MTkwMDE0MTNaMB4xHDAaBgNVBAMME0xDUCBUZXN0IEVDRFNBIFJvb3QwgZswEAYHKoZIzj0CAQYFK4EEACMDgYYABAHQDo2n02dCvTygb7J94K72bFelpG5SYxBpKZ+ebcdQ6MmTgO+wHbJPc/vevEZtlnmVi/ETbNJSdJRCF16jusOScwE0o4lnrn0pj5FDAy5zzccNvQS/lMfUyu1mZHVyay/waPETtLMzVkAN06dgF5FSxMHPQUPy4aqxif1AyS/vEJwlJKNTMFEwHQYDVR0OBBYEFOqa5Cxs2//DpBDO6eXFFUANO5LZMB8GA1UdIwQYMBaAFOqa5Cxs2//DpBDO6eXFFUANO5LZMA8GA1UdEwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDgYwAMIGIAkIB/JO+erctkgGaU8FPzHFKQyao9l+qYfDjMBfjlrKCZYGZ5MTHnplF5E+D3VIPYjO0hdwJ91zvTZaRk36WTl2NAAoCQgC/cHkCYN9CcO/PRio09FY+D0/djV1O4EJXPmGiNt+cVHY9G3BrhEoYH0hT8kk2nYuJTMyTef2muDnl2vnZ6gk+Qg==";
+    const ECDSA_PROVIDER_CERT_DER_B64: &str = "MIICCzCCAW2gAwIBAgIUTDgBmdwwckJiz8DIk1x9yBNAtHcwCgYIKoZIzj0EAwIwHjEcMBoGA1UEAwwTTENQIFRlc3QgRUNEU0EgUm9vdDAeFw0yNjA2MjIwMDE0MTNaFw0yNzA2MjIwMDE0MTNaMCIxIDAeBgNVBAMMF0xDUCBUZXN0IEVDRFNBIFByb3ZpZGVyMIGbMBAGByqGSM49AgEGBSuBBAAjA4GGAAQBWFy4Ok6FRr8Dz9M0pWRBLmbdFUhfkVXVWu9jjPtvn/nzx1BfhDqqw0wg1GoubwlLTqaaYLLIV/rH0RiAb+ASRxQBiB0eWk9Z7eH8pc6Vo0d7r+O0B+vYXZq7oijWQ2T+NAQMGsZyDcFJ1/BGS63+5k/JuEE2ljmmvsISXnlcP+QZclSjQjBAMB0GA1UdDgQWBBTJWZS4lQTvK4YlFoCQdAzcjtWufzAfBgNVHSMEGDAWgBTqmuQsbNv/w6QQzunlxRVADTuS2TAKBggqhkjOPQQDAgOBiwAwgYcCQgHOOo6TG4NKwuxR+OhB9gaMzxUrUNvUCfAEKZhgNrjWs5EClanJ2sPMvwSYlTQgQn9KAseqS10xeWvJMACXDAJVrQJBY0LNM6k9ZSesVE9+EvohNXTjoAY+Bmsplv3kGOf0NDPxYH17ZeZN6l3FxtLPXQPukhEktcI5GS1cu6YG27m2Xyw=";
+    const ECDSA_PROVIDER_PRIVATE_KEY_DER_B64: &str = "MIHuAgEAMBAGByqGSM49AgEGBSuBBAAjBIHWMIHTAgEBBEIAeh6bPZK81a/+76gCft377ucafMwM1JiEY6sgmE87YPdfzjNK4YghQy2E8J++Y9oqoctpn2tEUqhRUQwHJAlMGjKhgYkDgYYABAFYXLg6ToVGvwPP0zSlZEEuZt0VSF+RVdVa72OM+2+f+fPHUF+EOqrDTCDUai5vCUtOpppgsshX+sfRGIBv4BJHFAGIHR5aT1nt4fylzpWjR3uv47QH69hdmruiKNZDZP40BAwaxnINwUnX8EZLrf7mT8m4QTaWOaa+whJeeVw/5BlyVA==";
+
+    fn decode_der_base64(input: &str) -> Vec<u8> {
+        general_purpose::STANDARD
+            .decode(input)
+            .expect("Failed to decode base64 DER fixture")
+    }
 
     #[test]
     fn test_load_certificates() {
@@ -544,6 +553,22 @@ mod tests {
     }
 
     #[test]
+    fn test_validate_provider_certificate_chain_ecdsa() {
+        let root_cert = load_certificate_from_der(&decode_der_base64(ECDSA_ROOT_CA_DER_B64))
+            .expect("Failed to load ECDSA root certificate");
+        let provider_cert =
+            load_certificate_from_der(&decode_der_base64(ECDSA_PROVIDER_CERT_DER_B64))
+                .expect("Failed to load ECDSA provider certificate");
+
+        let result = validate_provider_certificate(&provider_cert, &root_cert);
+        assert!(
+            result.is_ok(),
+            "ECDSA certificate chain validation failed: {:?}",
+            result.err()
+        );
+    }
+
+    #[test]
     fn test_extract_public_key() {
         let provider_cert = load_certificate_from_der(PROVIDER_CERT_DER)
             .expect("Failed to load provider certificate");
@@ -554,6 +579,27 @@ mod tests {
             "Failed to extract public key: {:?}",
             public_key.err()
         );
+    }
+
+    #[test]
+    fn test_load_signing_key_ecdsa() {
+        let provider_cert =
+            load_certificate_from_der(&decode_der_base64(ECDSA_PROVIDER_CERT_DER_B64))
+                .expect("Failed to load ECDSA provider certificate");
+        let private_key = load_signing_key_from_der(
+            &decode_der_base64(ECDSA_PROVIDER_PRIVATE_KEY_DER_B64),
+            &provider_cert,
+        );
+
+        assert!(
+            private_key.is_ok(),
+            "Failed to load ECDSA signing key: {:?}",
+            private_key.err()
+        );
+        assert!(matches!(
+            private_key.unwrap(),
+            ProviderSigningKey::EcdsaP521(_)
+        ));
     }
 
     #[test]
