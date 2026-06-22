@@ -15,8 +15,32 @@ use x509_cert::{
 
 use crate::license::SignatureAlgorithm;
 
+/// Errors that can occur during signing or verification.
+#[derive(Debug, Error)]
+pub enum SignatureError {
+    /// Error related to the private/public key
+    #[error("Key error: {0}")]
+    KeyError(String),
+    /// Error related to certificate parsing or validation
+    #[error("Certificate error: {0}")]
+    CertificateError(String),
+    /// The certificate or license references a signature algorithm we do not support
+    #[error("Unsupported signature: {0}")]
+    UnsupportedSignature(String),
+    /// The signature format is invalid
+    #[error("Invalid signature: {0}")]
+    InvalidSignature(String),
+    /// Signature verification failed (signature doesn't match)
+    #[error("Verification failed: {0}")]
+    VerificationFailed(String),
+}
+
 #[derive(Clone)]
 pub enum ProviderSigningKey {
+    /// Based on some of the production LCP profiles I have checked, the `ecdsa_sha256` algorithm explicitly
+    /// uses the p521 curve.
+    ///
+    /// Currently, we only support the p521 curve, but if we see uses of other curves, we should add them in here.
     EcdsaP521(P521SigningKey),
     RsaSha256(RsaPrivateKey),
 }
@@ -30,11 +54,55 @@ impl ProviderSigningKey {
     }
 }
 
-/// Sign the canonical JSON bytes using RSA-SHA256 (PKCS#1 v1.5).
+/// Extracts the `SignatureAlgorithm` from the X509 certificate.
+fn provider_certificate_key_algorithm(
+    provider_certificate: &Certificate,
+) -> Result<SignatureAlgorithm, SignatureError> {
+    let algorithm = &provider_certificate
+        .tbs_certificate
+        .subject_public_key_info
+        .algorithm;
+
+    if algorithm.oid == RSA_ENCRYPTION {
+        return Ok(SignatureAlgorithm::RsaSha256);
+    }
+    if algorithm.oid == ID_EC_PUBLIC_KEY {
+        let curve_oid = algorithm
+            .parameters
+            .as_ref()
+            .ok_or_else(|| {
+                SignatureError::CertificateError(
+                    "Missing EC curve parameters in provider certificate".to_string(),
+                )
+            })?
+            .decode_as::<ObjectIdentifier>()
+            .map_err(|e| {
+                SignatureError::CertificateError(format!(
+                    "Failed to read EC curve OID from provider certificate: {}",
+                    e
+                ))
+            })?;
+
+        if curve_oid == SECP_521_R_1 {
+            return Ok(SignatureAlgorithm::EcdsaSha256);
+        } else {
+            return Err(SignatureError::UnsupportedSignature(format!(
+                "Unsupported provider certificate public-key algorithm OID: {}",
+                algorithm.oid
+            )));
+        }
+    }
+    Err(SignatureError::UnsupportedSignature(format!(
+        "Unsupported provider certificate public-key algorithm OID: {}",
+        algorithm.oid
+    )))
+}
+
+/// Sign the canonical JSON bytes using the selected license signature algorithm.
 ///
 /// # Arguments
 /// * `canonical_json` - The canonical form of the license document (as bytes)
-/// * `private_key` - The provider's RSA private key
+/// * `private_key` - The provider's private signing key
 ///
 /// # Returns
 /// Base64-encoded signature value
@@ -89,7 +157,7 @@ pub fn validate_provider_certificate(
     provider_cert: &Certificate,
     root_cert: &Certificate,
 ) -> Result<(), SignatureError> {
-    rsa_sha256::validate_provider_certificate(provider_cert, root_cert)
+    certificate_chain::validate_provider_certificate(provider_cert, root_cert)
 }
 
 /// Load a provider signing key from DER-encoded PKCS#8 bytes using the
@@ -98,61 +166,10 @@ pub fn load_signing_key_from_der(
     der_bytes: &[u8],
     provider_certificate: &Certificate,
 ) -> Result<ProviderSigningKey, SignatureError> {
-    let algorithm = &provider_certificate
-        .tbs_certificate
-        .subject_public_key_info
-        .algorithm;
-
-    if algorithm.oid == ID_EC_PUBLIC_KEY {
-        let curve_oid = algorithm
-            .parameters
-            .as_ref()
-            .ok_or_else(|| {
-                SignatureError::CertificateError(
-                    "Missing EC curve parameters in provider certificate".to_string(),
-                )
-            })?
-            .decode_as::<ObjectIdentifier>()
-            .map_err(|e| {
-                SignatureError::CertificateError(format!(
-                    "Failed to read EC curve OID from provider certificate: {}",
-                    e
-                ))
-            })?;
-
-        if curve_oid != SECP_521_R_1 {
-            return Err(SignatureError::CertificateError(format!(
-                "Unsupported EC curve in provider certificate: {}",
-                curve_oid
-            )));
-        }
-
-        use p521::SecretKey;
-        use p521::pkcs8::DecodePrivateKey;
-
-        let secret_key = SecretKey::from_pkcs8_der(der_bytes).map_err(|e| {
-            SignatureError::KeyError(format!("Failed to load P-521 private key: {}", e))
-        })?;
-        let signing_key = P521SigningKey::from_bytes(&secret_key.to_bytes()).map_err(|e| {
-            SignatureError::KeyError(format!("Failed to construct P-521 signing key: {}", e))
-        })?;
-        return Ok(ProviderSigningKey::EcdsaP521(signing_key));
+    match provider_certificate_key_algorithm(provider_certificate)? {
+        SignatureAlgorithm::RsaSha256 => rsa_sha256::load_signing_key_from_der(der_bytes),
+        SignatureAlgorithm::EcdsaSha256 => ecdsa_sha256::load_signing_key_from_der(der_bytes),
     }
-
-    if algorithm.oid == RSA_ENCRYPTION {
-        use rsa::pkcs8::DecodePrivateKey;
-
-        return RsaPrivateKey::from_pkcs8_der(der_bytes)
-            .map(ProviderSigningKey::RsaSha256)
-            .map_err(|e| {
-                SignatureError::KeyError(format!("Failed to load RSA private key: {}", e))
-            });
-    }
-
-    Err(SignatureError::CertificateError(format!(
-        "Unsupported provider certificate public-key algorithm OID: {}",
-        algorithm.oid
-    )))
 }
 
 /// Load an X.509 certificate from DER-encoded bytes.
@@ -169,9 +186,9 @@ mod rsa_sha256 {
         signature::{SignatureEncoding, Signer, Verifier},
     };
     use sha2::Sha256;
-    use x509_cert::{Certificate, der::Encode};
+    use x509_cert::Certificate;
 
-    use super::{SignatureError, general_purpose};
+    use super::{ProviderSigningKey, SignatureError, general_purpose};
     use base64::Engine;
 
     pub(super) fn sign_license(
@@ -209,26 +226,14 @@ mod rsa_sha256 {
             })
     }
 
-    pub(super) fn validate_provider_certificate(
-        provider_cert: &Certificate,
-        root_cert: &Certificate,
-    ) -> Result<(), SignatureError> {
-        let root_public_key = extract_public_key_from_certificate(root_cert)?;
-        let cert_signature_bytes = provider_cert.signature.raw_bytes();
-        let tbs_bytes = provider_cert.tbs_certificate.to_der().map_err(|e| {
-            SignatureError::CertificateError(format!("Failed to encode TBS certificate: {}", e))
-        })?;
+    pub(super) fn load_signing_key_from_der(
+        der_bytes: &[u8],
+    ) -> Result<ProviderSigningKey, SignatureError> {
+        use rsa::pkcs8::DecodePrivateKey;
 
-        let verifying_key = VerifyingKey::<Sha256>::new(root_public_key);
-        let signature = rsa::pkcs1v15::Signature::try_from(cert_signature_bytes).map_err(|e| {
-            SignatureError::CertificateError(format!("Invalid certificate signature format: {}", e))
-        })?;
-
-        verifying_key.verify(&tbs_bytes, &signature).map_err(|e| {
-            SignatureError::CertificateError(format!("Certificate validation failed: {}", e))
-        })?;
-
-        Ok(())
+        RsaPrivateKey::from_pkcs8_der(der_bytes)
+            .map(ProviderSigningKey::RsaSha256)
+            .map_err(|e| SignatureError::KeyError(format!("Failed to load RSA private key: {}", e)))
     }
 
     pub(super) fn extract_public_key_from_certificate(
@@ -256,20 +261,25 @@ mod ecdsa_sha256 {
     use sha2::{Digest, Sha256};
     use x509_cert::Certificate;
 
-    use super::{SignatureError, general_purpose};
+    use super::{ProviderSigningKey, SignatureError, general_purpose};
     use base64::Engine;
 
     const P521_PUBLIC_KEY_LEN: usize = 133;
     const P521_SIGNATURE_LEN: usize = 132;
     const P521_FIELD_BYTES_LEN: usize = 66;
 
+    fn prehash_from_canonical_json(canonical_json: &[u8]) -> FieldBytes {
+        let digest = Sha256::digest(canonical_json);
+        let mut prehash = FieldBytes::default();
+        prehash[(P521_FIELD_BYTES_LEN - digest.len())..].copy_from_slice(&digest);
+        prehash
+    }
+
     pub(super) fn sign_license(
         canonical_json: &[u8],
         private_key: &P521SigningKey,
     ) -> Result<String, SignatureError> {
-        let digest = Sha256::digest(canonical_json);
-        let mut prehash = FieldBytes::default();
-        prehash[(P521_FIELD_BYTES_LEN - digest.len())..].copy_from_slice(&digest);
+        let prehash = prehash_from_canonical_json(canonical_json);
 
         let signature = private_key.sign_prehash(&prehash).map_err(|e| {
             SignatureError::KeyError(format!("Failed to sign with P-521 private key: {}", e))
@@ -283,24 +293,12 @@ mod ecdsa_sha256 {
         signature_value: &str,
         certificate: &Certificate,
     ) -> Result<(), SignatureError> {
-        let public_key_bytes = certificate
-            .tbs_certificate
-            .subject_public_key_info
-            .subject_public_key
-            .raw_bytes();
+        let verifying_key = extract_public_key_from_certificate(certificate)?;
         let signature_bytes = general_purpose::STANDARD
             .decode(signature_value)
             .map_err(|e| {
                 SignatureError::InvalidSignature(format!("Base64 decode failed: {}", e))
             })?;
-
-        if public_key_bytes.len() != P521_PUBLIC_KEY_LEN {
-            return Err(SignatureError::CertificateError(format!(
-                "Unsupported ECDSA public key size: got {} bytes, expected {} for secp521r1",
-                public_key_bytes.len(),
-                P521_PUBLIC_KEY_LEN
-            )));
-        }
 
         if signature_bytes.len() != P521_SIGNATURE_LEN {
             return Err(SignatureError::InvalidSignature(format!(
@@ -310,17 +308,11 @@ mod ecdsa_sha256 {
             )));
         }
 
-        let verifying_key = P521VerifyingKey::from_sec1_bytes(public_key_bytes).map_err(|e| {
-            SignatureError::CertificateError(format!("Failed to extract P-521 public key: {}", e))
-        })?;
-
         let signature = P521Signature::from_slice(&signature_bytes).map_err(|e| {
             SignatureError::InvalidSignature(format!("Invalid P-521 signature format: {}", e))
         })?;
 
-        let digest = Sha256::digest(canonical_json);
-        let mut prehash = FieldBytes::default();
-        prehash[(P521_FIELD_BYTES_LEN - digest.len())..].copy_from_slice(&digest);
+        let prehash = prehash_from_canonical_json(canonical_json);
 
         verifying_key
             .verify_prehash(&prehash, &signature)
@@ -328,23 +320,75 @@ mod ecdsa_sha256 {
                 SignatureError::VerificationFailed(format!("Signature verification failed: {}", e))
             })
     }
+
+    pub(super) fn load_signing_key_from_der(
+        der_bytes: &[u8],
+    ) -> Result<ProviderSigningKey, SignatureError> {
+        use p521::SecretKey;
+        use p521::pkcs8::DecodePrivateKey;
+
+        let secret_key = SecretKey::from_pkcs8_der(der_bytes).map_err(|e| {
+            SignatureError::KeyError(format!("Failed to load P-521 private key: {}", e))
+        })?;
+        let signing_key = P521SigningKey::from_bytes(&secret_key.to_bytes()).map_err(|e| {
+            SignatureError::KeyError(format!("Failed to construct P-521 signing key: {}", e))
+        })?;
+
+        Ok(ProviderSigningKey::EcdsaP521(signing_key))
+    }
+
+    pub(super) fn extract_public_key_from_certificate(
+        certificate: &Certificate,
+    ) -> Result<P521VerifyingKey, SignatureError> {
+        let public_key_bytes = certificate
+            .tbs_certificate
+            .subject_public_key_info
+            .subject_public_key
+            .raw_bytes();
+
+        if public_key_bytes.len() != P521_PUBLIC_KEY_LEN {
+            return Err(SignatureError::CertificateError(format!(
+                "Unsupported ECDSA public key size: got {} bytes, expected {} for secp521r1",
+                public_key_bytes.len(),
+                P521_PUBLIC_KEY_LEN
+            )));
+        }
+
+        P521VerifyingKey::from_sec1_bytes(public_key_bytes).map_err(|e| {
+            SignatureError::CertificateError(format!("Failed to extract P-521 public key: {}", e))
+        })
+    }
 }
 
-/// Errors that can occur during signing or verification.
-#[derive(Debug, Error)]
-pub enum SignatureError {
-    /// Error related to the private/public key
-    #[error("Key error: {0}")]
-    KeyError(String),
-    /// Error related to certificate parsing or validation
-    #[error("Certificate error: {0}")]
-    CertificateError(String),
-    /// The signature format is invalid
-    #[error("Invalid signature: {0}")]
-    InvalidSignature(String),
-    /// Signature verification failed (signature doesn't match)
-    #[error("Verification failed: {0}")]
-    VerificationFailed(String),
+mod certificate_chain {
+    use rsa::pkcs1v15::VerifyingKey;
+    use rsa::signature::Verifier;
+    use sha2::Sha256;
+    use x509_cert::{Certificate, der::Encode};
+
+    use super::{SignatureError, rsa_sha256};
+
+    pub(super) fn validate_provider_certificate(
+        provider_cert: &Certificate,
+        root_cert: &Certificate,
+    ) -> Result<(), SignatureError> {
+        let root_public_key = rsa_sha256::extract_public_key_from_certificate(root_cert)?;
+        let cert_signature_bytes = provider_cert.signature.raw_bytes();
+        let tbs_bytes = provider_cert.tbs_certificate.to_der().map_err(|e| {
+            SignatureError::CertificateError(format!("Failed to encode TBS certificate: {}", e))
+        })?;
+
+        let verifying_key = VerifyingKey::<Sha256>::new(root_public_key);
+        let signature = rsa::pkcs1v15::Signature::try_from(cert_signature_bytes).map_err(|e| {
+            SignatureError::CertificateError(format!("Invalid certificate signature format: {}", e))
+        })?;
+
+        verifying_key.verify(&tbs_bytes, &signature).map_err(|e| {
+            SignatureError::CertificateError(format!("Certificate validation failed: {}", e))
+        })?;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
