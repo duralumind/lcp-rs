@@ -22,7 +22,7 @@ pub mod aes_cbc256 {
     };
     use block_padding::Pkcs7;
     use cbc::{Decryptor, Encryptor};
-    use rand::{TryRngCore, rngs::OsRng};
+    use rand_core::{OsRng, RngCore};
 
     type Aes256CbcEnc = Encryptor<Aes256>;
     type Aes256CbcDec = Decryptor<Aes256>;
@@ -33,9 +33,7 @@ pub mod aes_cbc256 {
     pub fn encrypt_aes_256_cbc_with_random_iv(plaintext: &[u8], key: &[u8; 32]) -> Vec<u8> {
         // Generate a random iv
         let mut iv = [0u8; 16];
-        OsRng
-            .try_fill_bytes(&mut iv)
-            .expect("Failed to generate randomness");
+        OsRng.fill_bytes(&mut iv);
         let mut encrypted = encrypt_aes_256_cbc(plaintext, key, &iv);
         let mut ciphertext = iv.to_vec();
         ciphertext.append(&mut encrypted);

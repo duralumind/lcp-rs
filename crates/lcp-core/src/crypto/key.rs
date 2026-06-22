@@ -1,6 +1,6 @@
 use super::cipher;
 use base64::{Engine as _, engine::general_purpose};
-use rand::{TryRngCore, rngs::OsRng};
+use rand_core::{OsRng, RngCore};
 use serde_derive::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use thiserror::Error;
@@ -84,9 +84,7 @@ pub struct ContentKey([u8; 32]);
 impl ContentKey {
     pub fn generate() -> Self {
         let mut key = [0u8; 32];
-        OsRng
-            .try_fill_bytes(&mut key)
-            .expect("Failed to generate randomness");
+        OsRng.fill_bytes(&mut key);
         Self(key)
     }
 
@@ -177,9 +175,7 @@ impl EncryptedContentKey {
         let user_key = UserEncryptionKey::new(passphrase, HashAlgorithm::Sha256, transform);
         // Generate a random iv
         let mut iv = [0u8; 16];
-        OsRng
-            .try_fill_bytes(&mut iv)
-            .expect("Failed to generate randomness");
+        OsRng.fill_bytes(&mut iv);
         let mut key = [0u8; 48];
         // Vec gets dropped right after the scope ends
         {
