@@ -1,0 +1,55 @@
+{
+  "provider": "https://www.myprovidername.org",
+  "id": "09d0c910-ee81-46c2-9372-9f79c49f0cf6",
+  "issued": "2024-04-18T08:20:00Z",
+  "encryption": {
+    "profile": "http://readium.org/lcp/profile-1.0",
+    "content_key": {
+      "algorithm": "http://www.w3.org/2001/04/xmlenc#aes256-cbc",
+      "encrypted_value": "EGQ/nZnh0KGBrks09+Xzhi2LZisSeoeKsxI7pt1ot8YpXfw/cFarlLmsrtV5uMXZuTW0qgEfjDbmeZbVYh3vBw=="
+    },
+    "user_key": {
+      "algorithm": "http://www.w3.org/2001/04/xmlenc#sha256",
+      "text_hint": "edrlab rocks",
+      "key_check": "/70uvuaSCb3OVvhoFKql+aNcm3KGF0gi0H3/jvXluqE382t8nXaZsh+c4lDQljT5BUUJWMP71YaT5OvckyUmzg=="
+    }
+  },
+  "links": [
+    {
+      "rel": "status",
+      "href": "https://front-prod.edrlab.org/lsdserver/licenses/09d0c910-ee81-46c2-9372-9f79c49f0cf6/status",
+      "type": "application/vnd.readium.license.status.v1.0+json"
+    },
+    {
+      "rel": "hint",
+      "href": "https://front-prod.edrlab.org/frontend/static/hint.html",
+      "type": "text/html"
+    },
+    {
+      "rel": "publication",
+      "href": "https://front-prod.edrlab.org/lcpserver/contents/580a115b-bc58-4648-88d7-b254d0b4ed5a",
+      "type": "application/epub+zip",
+      "title": "uploaded-2482138384.epub",
+      "length": 1646675,
+      "hash": "2299381678d6853b6274bd6c654457e660007122dde33952fb508a5143d1b90b"
+    }
+  ],
+  "user": {
+    "id": "942d331e-3cec-4c21-b1e7-debe1b7a9caf",
+    "email": "2ir88iFZ9SFgSKN6rp8M/6i+y+Y98wbmKjokZWFjmUWSIe7JnE44aLPYkx2VOAyk",
+    "name": "ftRtMqUcabg406prUiEkXjZsKzgOcFgUoBFeb28/Nys=",
+    "encrypted": [
+      "email",
+      "name"
+    ]
+  },
+  "rights": {
+    "print": 10,
+    "copy": 2000
+  },
+  "signature": {
+    "certificate": "MIIDKTCCAhGgAwIBAgIIEjZ5lJEfgf8wDQYJKoZIhvcNAQELBQAwQjETMBEGA1UEChMKZWRybGFiLm9yZzEXMBUGA1UECxMOZWRybGFiLm9yZyBMQ1AxEjAQBgNVBAMTCUVEUkxhYiBDQTAeFw0yMjA3MDgxNDMzMDFaFw0yNDA3MDcyMzU5NTlaME4xEzARBgNVBAoTCmVkcmxhYi5vcmcxJjAkBgNVBAsTHVJlYWRpdW0gTENQIExpY2Vuc2UgUHJvdmlkZXJzMQ8wDQYDVQQDEwZFRFJMYWIwgZswEAYHKoZIzj0CAQYFK4EEACMDgYYABAEU5BNfVLta4fz4MtmfHROMkLLThwyuKIKFeysg4cHjxBx0GAU+hGD3+rNTj7cDHa9FMQlE+sFNdbGfd2s4c3D8fAFErQI6QQ52MDuFSClaN0aWdVpjznc5V6Y6qvWTgh4P4V4gv40ot+QiVzwTevBWtsSbrw8nltCySIRGs66D7BEiU6OBnjCBmzAfBgNVHSMEGDAWgBTcXPyT5B+f7rC66lILK8pSXODJhzAdBgNVHQ4EFgQUCc2GhhgYvSOYvXkdYOxNqxs4FywwDgYDVR0PAQH/BAQDAgeAMAkGA1UdEwQCMAAwPgYDVR0fBDcwNTAzoDGgL4YtaHR0cDovL2NybC5lZHJsYWIudGVsZXNlYy5kZS9ybC9FRFJMYWJfQ0EuY3JsMA0GCSqGSIb3DQEBCwUAA4IBAQBxCl511aMdpIl56NKI0VW2tTM3FvhN717kNWsdr6Mj4xm2HXZ+BLfhGqFkm1iYwkM45o2unuVqe8zkIfEE24ghBd37aXrmS8IxY9t6gVFZKUGP/Q7NeA0EzUKru086mDDAuOgC05EAMlL6hgk+8IXw/BiD3hROAaop781UAkG3usU46n8w3meDqjjseLFfLTlGCU4njTGWZe3U8bOM0iz52LPcJGGT+fOPm2wGMdLL7aicxF166qWD05xC4UpdARwjopBGj7qkw6LVrM0E2mGpF0SyCyM4tdQH4PkHTtZ06vjipbzvE6TlFJP9/9M4HTUDDUevH4rPUip+de8wKvGF",
+    "value": "AKEDWd/YGrWkBYnEWqAuCaOuufIt1LhrjAMtzPWgHvnBORVy2+STOldXQwocJdvp6216MwEVrTI+H/d2fR+beJ/LAC8wSvDN8r5fStGCSh7M7lL/j5foB7ppxRi77o7NwiCBQftFYpfXga5c73146UbaTnWvqAxaildTmesojP7/OD8c",
+    "algorithm": "http://www.w3.org/2001/04/xmldsig-more#ecdsa-sha256"
+  }
+}

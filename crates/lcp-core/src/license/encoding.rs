@@ -1,12 +1,12 @@
 pub mod date_format {
-    use chrono::{DateTime, FixedOffset};
+    use chrono::{DateTime, FixedOffset, SecondsFormat};
     use serde::{self, Deserializer, Serialize, Serializer};
 
     pub fn serialize<S>(val: &DateTime<FixedOffset>, s: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let date_time_str = val.to_rfc3339();
+        let date_time_str = val.to_rfc3339_opts(SecondsFormat::Secs, true);
         date_time_str.serialize(s)
     }
 
