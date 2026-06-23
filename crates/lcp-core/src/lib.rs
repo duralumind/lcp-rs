@@ -24,7 +24,7 @@ pub use crypto::key::KeyError;
 pub use crypto::signature::SignatureError;
 pub use epub::EpubError;
 pub use license::LicenseError;
-pub use session::{DecryptedResource, OpenedPublication, SessionCapabilities, UnlockedPublication};
+pub use session::{OpenedPublication, UnlockedPublication};
 
 use std::path::PathBuf;
 
