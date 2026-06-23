@@ -77,7 +77,7 @@ impl UserEncryptionKey {
 
 /// The content key that is used as a key for the encryption algorithm for actually
 /// encrypting the contents of the publication.
-#[derive(Clone, Zeroize)]
+#[derive(Zeroize)]
 #[zeroize(drop)]
 pub struct ContentKey([u8; 32]);
 
@@ -168,7 +168,7 @@ impl EncryptedContentKey {
     /// The resulting `EncryptedContentKey` length is 48 bytes (16 bytes additional padding)
     /// and the iv length is 16 bytes.
     pub fn new(
-        content_key: ContentKey,
+        content_key: &ContentKey,
         passphrase: UserPassphrase,
         transform: impl Transform,
     ) -> Self {
@@ -239,7 +239,7 @@ mod tests {
         let content_key = ContentKey::generate();
 
         let encrypted_content_key = EncryptedContentKey::new(
-            content_key.clone(),
+            &content_key,
             UserPassphrase("password123".to_string()),
             IdentityTransform,
         );
@@ -263,7 +263,7 @@ mod tests {
         let content_key = ContentKey::generate();
 
         let encrypted_content_key = EncryptedContentKey::new(
-            content_key.clone(),
+            &content_key,
             UserPassphrase("password123".to_string()),
             ShaTransform,
         );

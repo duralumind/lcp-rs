@@ -83,8 +83,7 @@ pub fn encrypt_epub(
         &*transform,
     );
     let content_key = ContentKey::generate();
-    let encrypted_content_key =
-        EncryptedContentKey::new(content_key.clone(), passphrase, &*transform);
+    let encrypted_content_key = EncryptedContentKey::new(&content_key, passphrase, &*transform);
     let encrypted_epub = epub.create_encrypted_epub(output_path, &content_key)?;
 
     let provider_certificate =
