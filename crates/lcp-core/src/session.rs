@@ -1,3 +1,10 @@
+//! Reader-oriented API for opening, unlocking, and reading LCP-protected EPUBs.
+//!
+//! `OpenedPublication` loads the EPUB, license, root certificate, resolver, and
+//! encrypted-resource metadata. `unlock_with_passphrase` verifies the user key
+//! and license signature, then returns an `UnlockedPublication` that can decrypt
+//! individual encrypted resources or export a fully decrypted EPUB.
+
 use std::path::{Path, PathBuf};
 
 use crate::{
