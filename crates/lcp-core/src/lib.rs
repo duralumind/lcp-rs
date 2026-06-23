@@ -1,6 +1,7 @@
 pub mod crypto;
 pub mod epub;
 pub mod license;
+pub mod session;
 
 use crate::{
     crypto::{
@@ -23,6 +24,7 @@ pub use crypto::key::KeyError;
 pub use crypto::signature::SignatureError;
 pub use epub::EpubError;
 pub use license::LicenseError;
+pub use session::{DecryptedResource, OpenedPublication, SessionCapabilities, UnlockedPublication};
 
 use std::path::PathBuf;
 
@@ -261,28 +263,9 @@ pub fn decrypt_epub(
     println!("  Input:    {}", epub_path.display());
     println!("  Output:   {}", output_path.display());
 
-    let mut epub = Epub::new(epub_path)?;
-    let license = match external_license.as_ref() {
-        Some(l) => l,
-        None => epub
-            .license()
-            .ok_or(EpubError::MissingRequiredFile("license.lcpl".to_string()))?,
-    };
-    let transform = resolver
-        .resolve(license.profile_uri())
-        .map_err(|e| Error::License(LicenseError::UnsupportedEncryptionProfile(e)))?;
-    let passphrase = UserPassphrase(password);
-    let root_cert =
-        load_certificate_from_der(root_ca_der).expect("Failed to load root certificate");
-    let user_encryption_key =
-        UserEncryptionKey::new(passphrase, crypto::key::HashAlgorithm::Sha256, &*transform);
-    license.key_check(&user_encryption_key)?;
-    license.verify_signature_and_provider(&root_cert)?;
-    let content_key = license.decrypt_content_key(&user_encryption_key)?;
-    let decrypted_epub = epub.create_decrypted_epub(output_path, &content_key)?;
-    decrypted_epub
-        .finish()
-        .map_err(|e| EpubError::WriteFailed(format!("Failed to write decrypted epub: {}", e)))?;
+    OpenedPublication::open_path(epub_path, external_license, root_ca_der, resolver)?
+        .unlock_with_passphrase(&password)?
+        .export_decrypted_epub(output_path)?;
     Ok(())
 }
 

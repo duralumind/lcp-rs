@@ -9,12 +9,12 @@ use std::os::raw::c_char;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use lcp_core::TransformResolver;
-use lcp_core::crypto::key::{UserEncryptionKey, UserPassphrase};
 use lcp_core::epub::Epub;
+use lcp_core::{BasicResolver, EpubError, Error, LicenseError, OpenedPublication};
 
 // Global error storage (using Mutex instead of thread_local to avoid TLS init issues on old ARM)
 static LAST_ERROR: Mutex<Option<CString>> = Mutex::new(None);
+const ROOT_CA_DER: &[u8] = include_bytes!("../../../certs/root_ca.der");
 
 fn set_error(msg: String) {
     if let Ok(mut guard) = LAST_ERROR.lock() {
@@ -154,74 +154,35 @@ pub unsafe extern "C" fn lcp_decrypt_epub(
         }
     };
 
-    // Open the EPUB
-    let mut epub = match Epub::new(input_path.clone()) {
-        Ok(e) => e,
-        Err(e) => {
-            set_error(format!("Failed to open EPUB: {}", e));
-            log(&format!("ERROR: failed to open EPUB: {}", e));
-            return -1;
+    log("opening LCP session...");
+    let resolver = BasicResolver;
+    match OpenedPublication::open_path(input_path, None, ROOT_CA_DER, &resolver)
+        .and_then(|opened| opened.unlock_with_passphrase(pass))
+        .and_then(|unlocked| unlocked.export_decrypted_epub(output))
+    {
+        Ok(()) => {
+            log("decryption successful");
+            0
         }
-    };
-
-    // Check if it's LCP encrypted
-    let license = match epub.license() {
-        Some(l) => l,
-        None => {
+        Err(Error::License(LicenseError::KeyCheckFailed)) => {
+            set_error("Incorrect passphrase".to_string());
+            log("incorrect passphrase");
+            1
+        }
+        Err(Error::Epub(EpubError::MissingRequiredFile(file))) if file == "license.lcpl" => {
             set_error("EPUB is not LCP encrypted".to_string());
             log("not LCP encrypted");
-            return 2;
+            2
         }
-    };
-
-    let resolver = lcp_core::BasicResolver;
-    let transform = match resolver.resolve(license.profile_uri()) {
-        Ok(t) => t,
-        Err(e) => {
-            set_error(e.to_string());
-            log(&e.to_string());
-            return 2;
-        }
-    };
-    // Verify passphrase and get user key
-    log("verifying passphrase...");
-    let user_encryption_key = UserEncryptionKey::new(
-        UserPassphrase(pass.to_string()),
-        lcp_core::crypto::key::HashAlgorithm::Sha256,
-        &*transform,
-    );
-    if license.key_check(&user_encryption_key).is_err() {
-        set_error("Incorrect passphrase".to_string());
-        log("incorrect passphrase");
-        return 1;
-    };
-
-    // Decrypt the content key
-    log("decrypting content key...");
-    let content_key = match license.decrypt_content_key(&user_encryption_key) {
-        Ok(k) => k,
-        Err(e) => {
-            set_error(format!("Failed to decrypt content key: {}", e));
-            log(&format!("ERROR: failed to decrypt content key: {}", e));
-            return -1;
-        }
-    };
-
-    log("creating decrypted EPUB...");
-    match epub.create_decrypted_epub(output, &content_key) {
-        Ok(writer) => {
-            if let Err(e) = writer.finish() {
-                set_error(format!("Failed to finalize EPUB: {}", e));
-                log(&format!("ERROR: failed to finalize EPUB: {}", e));
-                return -1;
-            }
-            log("decryption successful");
-            return 0;
+        Err(Error::License(LicenseError::UnsupportedEncryptionProfile(e))) => {
+            set_error(e.clone());
+            log(&e);
+            2
         }
         Err(e) => {
             set_error(e.to_string());
             log(&format!("ERROR: {}", e));
-            return -1;
+            -1
         }
     }
 }
