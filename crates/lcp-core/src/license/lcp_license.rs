@@ -57,7 +57,7 @@ pub const DEFAULT_HASH_ALGORITHM: &str = "http://www.w3.org/2001/04/xmlenc#sha25
 pub const DEFAULT_ENCRYPTION_ALGORITHM: &str = "http://www.w3.org/2001/04/xmlenc#aes256-cbc";
 pub const DEFAULT_ENCRYPTION_PROFILE: &str = "http://readium.org/lcp/basic-profile";
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EncryptionAlgorithm {
     AesCbc,
 }
@@ -79,7 +79,7 @@ impl SignatureAlgorithm {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LicenseContentKey {
     /// Encrypted Content Key. Base 64 encoded octet sequence
     encrypted_value: String,
@@ -98,7 +98,7 @@ impl Default for LicenseContentKey {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct UserKey {
     /// A hint to be displayed to the User to help them remember the User Passphrase
     text_hint: String,
@@ -126,7 +126,7 @@ impl Default for UserKey {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Encryption {
     /// Identifies the Encryption Profile used by this LCP-protected
     /// Publication. Type: URI
@@ -148,7 +148,7 @@ impl Default for Encryption {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct Link {
     /// Location of the linked resource
     href: String,
@@ -179,7 +179,7 @@ pub struct Link {
     hash: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct Rights {
     /// Maximum number of pages that can be printed over the lifetime of the license.
     print: usize,
@@ -200,7 +200,7 @@ pub struct Rights {
     additional_fields: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct User {
     /// Unique identifier for the User at a specific Provider.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -216,7 +216,7 @@ pub struct User {
     additional_fields: HashMap<String, serde_json::Value>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Signature {
     /// Algorithm used to calculate the signature, identified using the URIs
     /// given in [XML-SIG]. This must match the signature algorithm named in
@@ -252,7 +252,7 @@ impl Signature {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct License {
     /// Unique identifier for the License
     pub id: String,

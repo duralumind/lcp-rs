@@ -120,6 +120,30 @@ fn read_binary_from_archive(
     Ok(Some(buffer))
 }
 
+fn decrypt_resource_data(
+    encrypted_file: &EncryptedFileInfo,
+    data: &[u8],
+    content_key: &ContentKey,
+) -> Result<Vec<u8>, EpubError> {
+    let decrypted_data = decrypt_aes_256_cbc_with_prepended_iv(data, content_key.key())
+        .map_err(|e| EpubError::DecryptionFailed(e.to_string()))?;
+
+    let uncompressed_decrypted_data = if !encrypted_file.is_compressed {
+        decrypted_data
+    } else {
+        deflate_uncompress(&decrypted_data)
+            .map_err(|e| EpubError::DecompressionFailed(format!("{:?}", e)))?
+    };
+    if uncompressed_decrypted_data.len() != encrypted_file.original_length {
+        return Err(EpubError::InvalidDecryptedLength {
+            original: encrypted_file.original_length,
+            decrypted: uncompressed_decrypted_data.len(),
+        });
+    }
+
+    Ok(uncompressed_decrypted_data)
+}
+
 /// Internal representation of an epub file with all required elements for
 /// 1. encrypting a epub publication to a lcp encrypted epub.
 /// 2. decrypting a lcp encrypted epub to a regular epub.
@@ -333,6 +357,17 @@ impl Epub {
         output: PathBuf,
         content_key: &ContentKey,
     ) -> Result<ZipWriter<File>, EpubError> {
+        let encrypted_resources = self.encrypted_resources()?;
+        self.create_decrypted_epub_with_resources(output, content_key, &encrypted_resources)
+    }
+
+    /// Creates a decrypted EPUB using already-parsed encrypted resource metadata.
+    pub fn create_decrypted_epub_with_resources(
+        &mut self,
+        output: PathBuf,
+        content_key: &ContentKey,
+        encrypted_resources: &[EncryptedFileInfo],
+    ) -> Result<ZipWriter<File>, EpubError> {
         // Create the writer
         let output =
             File::create(output).map_err(|e| EpubError::FileOpenFailed(format!("{}", e)))?;
@@ -340,30 +375,9 @@ impl Epub {
         let mut decrypted_files = HashSet::new();
 
         // Decrypt and write decrypted files
-        for encrypted_file in self.encrypted_resources()?.iter() {
-            let data = read_binary_from_archive(&mut self.archive, &encrypted_file.uri)?
-                .ok_or_else(|| {
-                    EpubError::MissingRequiredFile(format!(
-                        "Invalid path in encryption.xml: {:?}",
-                        &encrypted_file
-                    ))
-                })?;
-
-            let decrypted_data = decrypt_aes_256_cbc_with_prepended_iv(&data, content_key.key())
-                .map_err(|e| EpubError::DecryptionFailed(e.to_string()))?;
-
-            let uncompressed_decrypted_data = if !encrypted_file.is_compressed {
-                decrypted_data
-            } else {
-                deflate_uncompress(&decrypted_data)
-                    .map_err(|e| EpubError::DecompressionFailed(format!("{:?}", e)))?
-            };
-            if uncompressed_decrypted_data.len() != encrypted_file.original_length {
-                return Err(EpubError::InvalidDecryptedLength {
-                    original: encrypted_file.original_length,
-                    decrypted: uncompressed_decrypted_data.len(),
-                });
-            }
+        for encrypted_file in encrypted_resources.iter() {
+            let uncompressed_decrypted_data =
+                self.decrypt_resource_with_info(encrypted_file, content_key)?;
             // no need to compress already compressed files
             let options =
                 SimpleFileOptions::default().compression_method(zip::CompressionMethod::Deflated);
@@ -399,6 +413,23 @@ impl Epub {
         }
 
         Ok(writer)
+    }
+
+    /// Decrypts one encrypted resource using parsed metadata from encryption.xml.
+    pub fn decrypt_resource_with_info(
+        &mut self,
+        encrypted_file: &EncryptedFileInfo,
+        content_key: &ContentKey,
+    ) -> Result<Vec<u8>, EpubError> {
+        let data =
+            read_binary_from_archive(&mut self.archive, &encrypted_file.uri)?.ok_or_else(|| {
+                EpubError::MissingRequiredFile(format!(
+                    "Invalid path in encryption.xml: {:?}",
+                    encrypted_file
+                ))
+            })?;
+
+        decrypt_resource_data(encrypted_file, &data, content_key)
     }
 
     /// Returns a list of encrypted resources from encryption.xml.

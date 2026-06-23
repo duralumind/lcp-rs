@@ -1,6 +1,7 @@
 pub mod crypto;
 pub mod epub;
 pub mod license;
+pub mod session;
 
 use crate::{
     crypto::{
@@ -8,7 +9,7 @@ use crate::{
         signature::{load_certificate_from_der, load_signing_key_from_der},
     },
     epub::Epub,
-    license::{License, LicenseBuilder},
+    license::LicenseBuilder,
 };
 use thiserror::Error;
 
@@ -23,6 +24,7 @@ pub use crypto::key::KeyError;
 pub use crypto::signature::SignatureError;
 pub use epub::EpubError;
 pub use license::LicenseError;
+pub use session::{OpenedPublication, UnlockedPublication};
 
 use std::path::PathBuf;
 
@@ -81,8 +83,7 @@ pub fn encrypt_epub(
         &*transform,
     );
     let content_key = ContentKey::generate();
-    let encrypted_content_key =
-        EncryptedContentKey::new(content_key.clone(), passphrase, &*transform);
+    let encrypted_content_key = EncryptedContentKey::new(&content_key, passphrase, &*transform);
     let encrypted_epub = epub.create_encrypted_epub(output_path, &content_key)?;
 
     let provider_certificate =
@@ -240,52 +241,6 @@ pub fn encrypt_epub_from_bytes(
     Ok((result.into_inner(), encrypted_files))
 }
 
-/// Decrypt an EPUB file with LCP DRM.
-///
-/// Takes the path to the encrypted epub, an optional externally-provided license,
-/// and the root CA certificate for signature verification.
-pub fn decrypt_epub(
-    epub_path: PathBuf,
-    external_license: Option<License>,
-    password: String,
-    output: Option<PathBuf>,
-    root_ca_der: &[u8],
-    resolver: &dyn TransformResolver,
-) -> Result<(), Error> {
-    let output_path = output.unwrap_or_else(|| {
-        let stem = epub_path.file_stem().unwrap_or_default().to_string_lossy();
-        epub_path.with_file_name(format!("{}.decrypted.epub", stem))
-    });
-
-    println!("Decrypting EPUB:");
-    println!("  Input:    {}", epub_path.display());
-    println!("  Output:   {}", output_path.display());
-
-    let mut epub = Epub::new(epub_path)?;
-    let license = match external_license.as_ref() {
-        Some(l) => l,
-        None => epub
-            .license()
-            .ok_or(EpubError::MissingRequiredFile("license.lcpl".to_string()))?,
-    };
-    let transform = resolver
-        .resolve(license.profile_uri())
-        .map_err(|e| Error::License(LicenseError::UnsupportedEncryptionProfile(e)))?;
-    let passphrase = UserPassphrase(password);
-    let root_cert =
-        load_certificate_from_der(root_ca_der).expect("Failed to load root certificate");
-    let user_encryption_key =
-        UserEncryptionKey::new(passphrase, crypto::key::HashAlgorithm::Sha256, &*transform);
-    license.key_check(&user_encryption_key)?;
-    license.verify_signature_and_provider(&root_cert)?;
-    let content_key = license.decrypt_content_key(&user_encryption_key)?;
-    let decrypted_epub = epub.create_decrypted_epub(output_path, &content_key)?;
-    decrypted_epub
-        .finish()
-        .map_err(|e| EpubError::WriteFailed(format!("Failed to write decrypted epub: {}", e)))?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use crate::license::lcp_license::DEFAULT_ENCRYPTION_PROFILE;
@@ -310,14 +265,16 @@ mod tests {
             PROVIDER_PRIVATE_KEY_DER,
         )
         .unwrap();
-        decrypt_epub(
+        OpenedPublication::open_path(
             PathBuf::from("/tmp/moby-dick-encrypted.epub"),
             None,
-            "test123".to_string(),
-            Some(PathBuf::from("/tmp/moby-dick-decrypted.epub")),
             ROOT_CA_DER,
             &resolver,
         )
+        .unwrap()
+        .unlock_with_passphrase("test123")
+        .unwrap()
+        .export_decrypted_epub(PathBuf::from("/tmp/moby-dick-decrypted.epub"))
         .unwrap();
     }
 }

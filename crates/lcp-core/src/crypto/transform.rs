@@ -24,9 +24,10 @@ impl<T: Transform + ?Sized> Transform for &T {
 /// [`Transform`] implementation.
 ///
 /// Implement this trait to support additional encryption profiles. The resolver
-/// is passed to [`decrypt_epub`](crate::decrypt_epub) and [`encrypt_epub`](crate::encrypt_epub)
-/// and is called with the profile URI. Return the appropriate `Transform` for
-/// that profile, or an error string if the profile is unsupported.
+/// is passed to [`OpenedPublication`](crate::OpenedPublication) and
+/// [`encrypt_epub`](crate::encrypt_epub), then called with the profile URI.
+/// Return the appropriate `Transform` for that profile, or an error string if
+/// the profile is unsupported.
 ///
 /// # Example
 ///
